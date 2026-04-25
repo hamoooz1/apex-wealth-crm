@@ -3,15 +3,7 @@ import { Search, UserPlus, X, Save } from 'lucide-react'
 import './Team.css'
 import { useAuth } from '../contexts/AuthContext.jsx'
 import { fetchProfilesPageData, updateProfileById } from '../lib/queries.js'
-
-function initials(name) {
-  const parts = String(name || '')
-    .trim()
-    .split(/\s+/)
-    .filter(Boolean)
-  if (!parts.length) return 'A'
-  return (parts[0][0] + (parts[1]?.[0] || '')).toUpperCase()
-}
+import Avatar from '../components/ui/Avatar.jsx'
 
 function formatDate(iso) {
   if (!iso) return '—'
@@ -192,7 +184,7 @@ export default function Team() {
                   filtered.map((p) => (
                   <tr key={p.id} onClick={() => onOpen(p)} role="button">
                     <td>
-                      <div className="teamAvatar">{initials(p.full_name)}</div>
+                      <Avatar name={p.full_name} src={p.avatar_url || ''} size="md" />
                     </td>
                     <td className="teamName">{p.full_name}</td>
                     <td className="teamMuted">{p.email}</td>
@@ -245,7 +237,7 @@ export default function Team() {
               hierarchy.map((h) => (
                 <div className="hierGroup" key={h.manager.id}>
                   <div className="hierManager">
-                    <div className="teamAvatar sm">{initials(h.manager.full_name)}</div>
+                    <Avatar name={h.manager.full_name} src={h.manager.avatar_url || ''} size="sm" />
                     <div>
                       <div className="hierName">{h.manager.full_name}</div>
                       <div className="hierMeta">{h.manager.email}</div>
@@ -258,7 +250,7 @@ export default function Team() {
                     ) : (
                       h.advisors.map((a) => (
                         <div className="hierChild" key={a.id} onClick={() => onOpen(a)} role="button">
-                          <div className="teamAvatar sm">{initials(a.full_name)}</div>
+                          <Avatar name={a.full_name} src={a.avatar_url || ''} size="sm" />
                           <div className="hierName">{a.full_name}</div>
                           <span className="roleBadge role-advisor">Advisor</span>
                         </div>
@@ -287,7 +279,7 @@ export default function Team() {
           {selected && draft ? (
             <div className="drawerBody">
               <div className="drawerHero">
-                <div className="drawerAvatar">{initials(selected.full_name)}</div>
+                <Avatar name={selected.full_name} src={selected.avatar_url || ''} size="lg" />
                 <div>
                   <div className="drawerName">{selected.full_name}</div>
                   <div className="drawerEmail">{selected.email}</div>

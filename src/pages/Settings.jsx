@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Eye, EyeOff, Plus, Save, ShieldCheck } from 'lucide-react'
+import { Eye, EyeOff, Plus, Save, ShieldCheck, Upload } from 'lucide-react'
 import './Settings.css'
 import { useAuth } from '../contexts/AuthContext.jsx'
 import { createProfileRow, fetchProfilesPageData, updateProfileById } from '../lib/queries.js'
 import { supabase } from '../lib/supabaseClient.js'
 import { inviteUser } from '../lib/invite.js'
+import Avatar from '../components/ui/Avatar.jsx'
 
 function roleLabel(role) {
   if (role === 'admin') return 'Admin'
@@ -22,6 +23,7 @@ export default function Settings() {
     email: '',
     role: '',
     is_active: true,
+    avatar_url: '',
   })
   const [savedProfile, setSavedProfile] = useState(myProfile)
   const [savingProfile, setSavingProfile] = useState(false)
@@ -29,7 +31,8 @@ export default function Settings() {
   const profileDirty = useMemo(() => {
     return (
       myProfile.full_name !== savedProfile.full_name ||
-      myProfile.is_active !== savedProfile.is_active
+      myProfile.is_active !== savedProfile.is_active ||
+      myProfile.avatar_url !== savedProfile.avatar_url
     )
   }, [myProfile, savedProfile])
 
@@ -40,6 +43,7 @@ export default function Settings() {
       email: profile.email || user?.email || '',
       role: profile.role || '',
       is_active: profile.is_active !== false,
+      avatar_url: profile.avatar_url || '',
     }
     setMyProfile(next)
     setSavedProfile(next)
@@ -116,12 +120,41 @@ export default function Settings() {
       const id = p?.id || profile?.id
       if (!id) throw new Error('No profile row found for current user.')
 
-      const patch = { full_name: myProfile.full_name }
+      const patch = { full_name: myProfile.full_name, avatar_url: myProfile.avatar_url || null }
       if (isAdmin) patch.is_active = !!myProfile.is_active
 
       await updateProfileById(id, patch)
       await refreshProfile()
       setSavedProfile(myProfile)
+    } catch (e) {
+      setProfileSaveError(e)
+    } finally {
+      setSavingProfile(false)
+    }
+  }
+
+  async function uploadAvatar(file) {
+    if (!file) return
+    setProfileSaveError(null)
+    setSavingProfile(true)
+    try {
+      const p = await ensureProfileRowExists()
+      const id = p?.id || profile?.id
+      if (!id) throw new Error('No profile row found for current user.')
+
+      const ext = file.name.split('.').pop() || 'png'
+      const path = `${id}/avatar.${ext}`
+
+      const { error: upErr } = await supabase.storage
+        .from('avatars')
+        .upload(path, file, { upsert: true, contentType: file.type })
+      if (upErr) throw upErr
+
+      const { data: pub } = supabase.storage.from('avatars').getPublicUrl(path)
+      const publicUrl = pub?.publicUrl
+      if (!publicUrl) throw new Error('Failed to get public URL for uploaded avatar.')
+
+      setMyProfile((x) => ({ ...x, avatar_url: publicUrl }))
     } catch (e) {
       setProfileSaveError(e)
     } finally {
@@ -214,6 +247,28 @@ export default function Settings() {
               <div className="inlineError">{profileSaveError.message || 'Failed to save profile.'}</div>
             ) : null}
             <div className="formGrid">
+              <div className="sField" style={{ gridColumn: '1 / -1' }}>
+                <div className="sLabel">Profile picture</div>
+                <div className="avatarRow">
+                  <Avatar name={myProfile.full_name || 'Apex User'} src={myProfile.avatar_url || ''} size="lg" />
+                  <div className="avatarActions">
+                    <label className="btnSecondary" style={{ display: 'inline-flex', gap: 8, alignItems: 'center' }}>
+                      <Upload size={16} />
+                      Upload
+                      <input
+                        type="file"
+                        accept="image/*"
+                        style={{ display: 'none' }}
+                        onChange={(e) => uploadAvatar(e.target.files?.[0])}
+                      />
+                    </label>
+                    <div className="muted" style={{ fontSize: 11 }}>
+                      PNG/JPG, square preferred.
+                    </div>
+                  </div>
+                </div>
+              </div>
+
               <label className="sField">
                 <div className="sLabel">Full Name</div>
                 <input

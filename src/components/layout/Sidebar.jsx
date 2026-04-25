@@ -13,6 +13,7 @@ import {
 
 import { useAuth } from '../../contexts/AuthContext.jsx'
 import apexLogo from '../../assets/apex-wealth-logo.png'
+import Avatar from '../ui/Avatar.jsx'
 
 const navSections = [
   {
@@ -38,15 +39,6 @@ const navSections = [
     items: [{ to: '/settings', label: 'Settings', icon: Settings }],
   },
 ]
-
-function initials(name) {
-  const parts = String(name || '')
-    .trim()
-    .split(/\s+/)
-    .filter(Boolean)
-  if (!parts.length) return 'A'
-  return (parts[0][0] + (parts[1]?.[0] || '')).toUpperCase()
-}
 
 export default function Sidebar() {
   const { profile, signOut } = useAuth()
@@ -98,9 +90,11 @@ export default function Sidebar() {
 
       <div className="sidebarBottom">
         <div className="profileBox">
-          <div className="profileAvatar" aria-hidden="true">
-            {initials(profile?.full_name || 'Apex User')}
-          </div>
+          <Avatar
+            name={profile?.full_name || 'Apex User'}
+            src={profile?.avatar_url || ''}
+            size="md"
+          />
           <div className="profileMeta">
             <div className="profileName">{profile?.full_name || 'Apex User'}</div>
             <div className="profileRole">{profile?.role || 'user'}</div>

@@ -845,6 +845,7 @@
 
 .chartBody {
   padding: 0 14px 14px;
+  min-height: 260px;
 }
 
 .donutLegend {
@@ -1028,6 +1029,10 @@
   color: var(--muted);
 }
 
+.pipelineSelect {
+  min-width: 120px;
+}
+
 .taskTitle {
   font-size: 12px;
   font-weight: 650;
@@ -1180,6 +1185,202 @@ table.crmTable {
   font-size: 12px;
   outline: none;
   min-width: 140px;
+}
+
+/* Custom Select */
+.uiSelect {
+  position: relative;
+  min-width: 140px;
+}
+
+.uiSelect-sm .uiSelectBtn {
+  height: 30px;
+  border-radius: 12px;
+}
+
+.uiSelectBtn {
+  width: 100%;
+  height: 34px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: #fbfbfc;
+  padding: 0 10px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 12px;
+  color: var(--text);
+  cursor: pointer;
+  box-shadow: var(--shadow-sm);
+}
+
+.uiSelectBtn.isDisabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.uiSelectValue {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.uiSelectValue.isPlaceholder {
+  color: var(--muted-2);
+}
+
+.uiSelectChevron {
+  color: var(--muted);
+  transition: transform 140ms ease;
+}
+
+.uiSelectChevron.isOpen {
+  transform: rotate(180deg);
+}
+
+.uiSelectMenu {
+  position: absolute;
+  top: calc(100% + 6px);
+  min-width: 100%;
+  max-height: 260px;
+  overflow: auto;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  box-shadow: var(--shadow-md);
+  padding: 6px;
+  z-index: 120;
+}
+
+.uiSelectMenu.align-right {
+  right: 0;
+}
+
+.uiSelectMenu.align-left {
+  left: 0;
+}
+
+.uiSelectOption {
+  width: 100%;
+  border: 1px solid transparent;
+  background: transparent;
+  padding: 9px 10px;
+  border-radius: 12px;
+  text-align: left;
+  font-size: 12px;
+  cursor: pointer;
+  color: var(--text);
+}
+
+.uiSelectOption.isActive,
+.uiSelectOption:hover {
+  background: #f3f5f9;
+  border-color: var(--border-2);
+}
+
+.uiSelectOption.isSelected {
+  background: rgba(37, 99, 235, 0.08);
+  border-color: rgba(37, 99, 235, 0.18);
+}
+
+/* Avatar */
+.uiAvatar {
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: linear-gradient(180deg, #eef2ff, #ffffff);
+  overflow: hidden;
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+}
+
+.uiAvatar-sm {
+  width: 28px;
+  height: 28px;
+  border-radius: 10px;
+}
+
+.uiAvatar-md {
+  width: 32px;
+  height: 32px;
+  border-radius: 12px;
+}
+
+.uiAvatar-lg {
+  width: 44px;
+  height: 44px;
+  border-radius: 16px;
+}
+
+.uiAvatarImg {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.uiAvatarText {
+  font-weight: 900;
+  color: #1d4ed8;
+  font-size: 12px;
+}
+
+.uiAvatar-sm .uiAvatarText {
+  font-size: 11px;
+}
+
+/* Modal (used across pages) */
+.modalOverlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.10);
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  z-index: 180;
+}
+
+.modalCard {
+  width: 560px;
+  max-width: 100%;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  box-shadow: var(--shadow-md);
+  overflow: hidden;
+}
+
+.modalHeader {
+  padding: 14px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.modalTitle {
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.modalSub {
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.modalBody {
+  padding: 12px 14px 14px;
+}
+
+.modalFooter {
+  padding: 12px 14px 14px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
 }
 
 @media (max-width: 1200px) {
