@@ -8,6 +8,7 @@ import Dashboard from './pages/Dashboard.jsx'
 import Tasks from './pages/Tasks.jsx'
 import Pipeline from './pages/Pipeline.jsx'
 import Clients from './pages/Clients.jsx'
+import Leads from './pages/Leads.jsx'
 import Team from './pages/Team.jsx'
 import Settings from './pages/Settings.jsx'
 import Auth from './pages/Auth.jsx'
@@ -61,6 +62,7 @@ function App() {
                 <Routes>
                   <Route path="/" element={<Navigate to="/dashboard" replace />} />
                   <Route path="/dashboard" element={<Dashboard />} />
+                  <Route path="/leads" element={<Leads />} />
                   <Route path="/tasks" element={<Tasks />} />
                   <Route path="/pipeline" element={<Pipeline />} />
                   <Route path="/clients" element={<Clients />} />

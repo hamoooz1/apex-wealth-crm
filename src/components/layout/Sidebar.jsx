@@ -5,6 +5,7 @@ import {
   Users,
   Settings,
   KanbanSquare,
+  UserRoundSearch,
   ListTodo,
   CalendarDays,
   LogOut,
@@ -21,6 +22,7 @@ const navSections = [
   {
     label: 'CRM',
     items: [
+      { to: '/leads', label: 'Leads', icon: UserRoundSearch },
       { to: '/pipeline', label: 'Pipeline', icon: KanbanSquare },
       { to: '/clients', label: 'Clients', icon: Briefcase },
       { to: null, label: 'Calendar', icon: CalendarDays, disabled: true },

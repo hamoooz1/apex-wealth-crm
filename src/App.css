@@ -349,6 +349,13 @@
   animation: fadeOut 420ms ease forwards;
 }
 
+.confettiCanvas {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 200;
+}
+
 @keyframes authIn {
   from {
     opacity: 0;
@@ -955,6 +962,11 @@
   min-height: 520px;
 }
 
+.kanbanColDrop {
+  border-color: rgba(37, 99, 235, 0.30);
+  background: rgba(37, 99, 235, 0.05);
+}
+
 .kanbanColHeader {
   display: flex;
   align-items: center;
@@ -1000,6 +1012,11 @@
   margin-bottom: 10px;
 }
 
+.taskCardDragging {
+  opacity: 0.55;
+  transform: rotate(-0.3deg);
+}
+
 .pipelineTitle {
   font-size: 12px;
   font-weight: 750;
@@ -1015,6 +1032,24 @@
   font-size: 12px;
   font-weight: 650;
   margin: 0;
+}
+
+.taskTopRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.inlineSelect {
+  border: none;
+  background: transparent;
+  color: inherit;
+  font-size: 11px;
+  outline: none;
+  appearance: none;
+  padding-right: 2px;
+  cursor: pointer;
 }
 
 .taskDesc {
@@ -1134,6 +1169,17 @@ table.crmTable {
   border-color: rgba(148, 163, 184, 0.35);
   background: rgba(148, 163, 184, 0.12);
   color: #475569;
+}
+
+.inlineInput {
+  height: 34px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: #fbfbfc;
+  padding: 0 10px;
+  font-size: 12px;
+  outline: none;
+  min-width: 140px;
 }
 
 @media (max-width: 1200px) {

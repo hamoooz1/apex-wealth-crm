@@ -1,0 +1,57 @@
+.leadsHeaderRight {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.leadsSearch {
+  height: 34px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  padding: 0 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  box-shadow: var(--shadow-sm);
+  color: var(--muted);
+}
+
+.leadsSearch input {
+  border: none;
+  outline: none;
+  background: transparent;
+  font-size: 12px;
+  width: 220px;
+  color: var(--text);
+}
+
+.leadsTable .avatar {
+  width: 28px;
+  height: 28px;
+  border-radius: 10px;
+  display: grid;
+  place-items: center;
+}
+
+.leadAvatarText {
+  font-size: 11px;
+  font-weight: 900;
+  color: #1d4ed8;
+}
+
+.leadName {
+  font-weight: 750;
+}
+
+.sTextarea {
+  border-radius: 14px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  padding: 10px 12px;
+  font-size: 12px;
+  outline: none;
+  box-shadow: var(--shadow-sm);
+  resize: vertical;
+}
+
