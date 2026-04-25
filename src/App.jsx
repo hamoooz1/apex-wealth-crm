@@ -1,122 +1,79 @@
-import { useState } from 'react'
-import reactLogo from './assets/react.svg'
-import viteLogo from './assets/vite.svg'
-import heroImg from './assets/hero.png'
 import './App.css'
+import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 
-function App() {
-  const [count, setCount] = useState(0)
+import Sidebar from './components/layout/Sidebar.jsx'
+import Topbar from './components/layout/Topbar.jsx'
 
+import Dashboard from './pages/Dashboard.jsx'
+import Tasks from './pages/Tasks.jsx'
+import Pipeline from './pages/Pipeline.jsx'
+import Clients from './pages/Clients.jsx'
+import Team from './pages/Team.jsx'
+import Settings from './pages/Settings.jsx'
+import Auth from './pages/Auth.jsx'
+import { AuthProvider, useAuth } from './contexts/AuthContext.jsx'
+import { useEffect, useState } from 'react'
+
+function AuthGate({ children }) {
+  const { loading, session } = useAuth()
+  const [transitioning, setTransitioning] = useState(false)
+
+  useEffect(() => {
+    if (session) {
+      setTransitioning(true)
+      const t = setTimeout(() => setTransitioning(false), 420)
+      return () => clearTimeout(t)
+    }
+    setTransitioning(false)
+  }, [session])
+
+  if (loading) {
+    return (
+      <div className="authWrap">
+        <div className="authCard" style={{ textAlign: 'left' }}>
+          <div className="authTitle" style={{ marginTop: 0 }}>
+            Loading…
+          </div>
+          <div className="authSubtitle">Connecting to Supabase session</div>
+        </div>
+      </div>
+    )
+  }
+  if (!session) return <Auth />
   return (
     <>
-      <section id="center">
-        <div className="hero">
-          <img src={heroImg} className="base" width="170" height="179" alt="" />
-          <img src={reactLogo} className="framework" alt="React logo" />
-          <img src={viteLogo} className="vite" alt="Vite logo" />
-        </div>
-        <div>
-          <h1>Get started</h1>
-          <p>
-            Edit <code>src/App.jsx</code> and save to test <code>HMR</code>
-          </p>
-        </div>
-        <button
-          type="button"
-          className="counter"
-          onClick={() => setCount((count) => count + 1)}
-        >
-          Count is {count}
-        </button>
-      </section>
-
-      <div className="ticks"></div>
-
-      <section id="next-steps">
-        <div id="docs">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#documentation-icon"></use>
-          </svg>
-          <h2>Documentation</h2>
-          <p>Your questions, answered</p>
-          <ul>
-            <li>
-              <a href="https://vite.dev/" target="_blank">
-                <img className="logo" src={viteLogo} alt="" />
-                Explore Vite
-              </a>
-            </li>
-            <li>
-              <a href="https://react.dev/" target="_blank">
-                <img className="button-icon" src={reactLogo} alt="" />
-                Learn more
-              </a>
-            </li>
-          </ul>
-        </div>
-        <div id="social">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#social-icon"></use>
-          </svg>
-          <h2>Connect with us</h2>
-          <p>Join the Vite community</p>
-          <ul>
-            <li>
-              <a href="https://github.com/vitejs/vite" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#github-icon"></use>
-                </svg>
-                GitHub
-              </a>
-            </li>
-            <li>
-              <a href="https://chat.vite.dev/" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#discord-icon"></use>
-                </svg>
-                Discord
-              </a>
-            </li>
-            <li>
-              <a href="https://x.com/vite_js" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#x-icon"></use>
-                </svg>
-                X.com
-              </a>
-            </li>
-            <li>
-              <a href="https://bsky.app/profile/vite.dev" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#bluesky-icon"></use>
-                </svg>
-                Bluesky
-              </a>
-            </li>
-          </ul>
-        </div>
-      </section>
-
-      <div className="ticks"></div>
-      <section id="spacer"></section>
+      {transitioning ? <div className="loginTransition" aria-hidden="true" /> : null}
+      {children}
     </>
   )
 }
 
+function App() {
+  return (
+    <AuthProvider>
+      <BrowserRouter>
+        <AuthGate>
+          <div className="appShell">
+            <Sidebar />
+            <main className="appMain">
+              <Topbar />
+              <div className="appContent">
+                <Routes>
+                  <Route path="/" element={<Navigate to="/dashboard" replace />} />
+                  <Route path="/dashboard" element={<Dashboard />} />
+                  <Route path="/tasks" element={<Tasks />} />
+                  <Route path="/pipeline" element={<Pipeline />} />
+                  <Route path="/clients" element={<Clients />} />
+                  <Route path="/team" element={<Team />} />
+                  <Route path="/settings" element={<Settings />} />
+                  <Route path="*" element={<Navigate to="/dashboard" replace />} />
+                </Routes>
+              </div>
+            </main>
+          </div>
+        </AuthGate>
+      </BrowserRouter>
+    </AuthProvider>
+  )
+}
 export default App

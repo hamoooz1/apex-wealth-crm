@@ -1,0 +1,260 @@
+.settingsStack {
+  display: grid;
+  gap: 12px;
+}
+
+.settingsCard {
+  overflow: hidden;
+}
+
+.settingsBody {
+  padding: 12px 14px 14px;
+}
+
+.formGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.sField {
+  display: grid;
+  gap: 6px;
+}
+
+.sLabel {
+  font-size: 11px;
+  font-weight: 750;
+  color: #1f2937;
+}
+
+.sHint {
+  margin-top: 3px;
+  font-size: 11px;
+  color: var(--muted);
+  font-weight: 500;
+}
+
+.sInput {
+  height: 38px;
+  border-radius: 14px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  padding: 0 12px;
+  font-size: 12px;
+  outline: none;
+  box-shadow: var(--shadow-sm);
+}
+
+.sReadRow {
+  height: 38px;
+  border-radius: 14px;
+  border: 1px solid var(--border);
+  background: #fbfbfc;
+  padding: 0 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.sBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.settingsFooter {
+  display: flex;
+  justify-content: flex-end;
+  padding-top: 12px;
+}
+
+.sToggleRow {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border-radius: 14px;
+  border: 1px solid var(--border);
+  background: #fbfbfc;
+}
+
+.pwRow {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 10px;
+  align-items: start;
+}
+
+.pwGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.pwToggle {
+  margin-top: 18px;
+  height: 38px;
+}
+
+.inlineError {
+  margin-top: 10px;
+  padding: 10px 12px;
+  border-radius: 14px;
+  border: 1px solid rgba(239, 68, 68, 0.25);
+  background: rgba(239, 68, 68, 0.06);
+  color: #b42318;
+  font-size: 12px;
+}
+
+.inlineHint {
+  margin-top: 10px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.prefsGrid {
+  display: grid;
+  gap: 10px;
+}
+
+.adminTop {
+  display: flex;
+  justify-content: flex-end;
+  padding-bottom: 10px;
+}
+
+.adminTableWrap {
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--surface);
+}
+
+table.adminTable {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+}
+
+.adminTable th,
+.adminTable td {
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border-2);
+  font-size: 12px;
+  background: var(--surface);
+  white-space: nowrap;
+}
+
+.adminTable th {
+  text-align: left;
+  color: var(--muted);
+  font-weight: 650;
+}
+
+.tName {
+  font-weight: 750;
+}
+
+.tMuted {
+  color: var(--muted);
+}
+
+.tSelect {
+  height: 34px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: #fbfbfc;
+  padding: 0 10px;
+  font-size: 12px;
+  outline: none;
+}
+
+.inlineToggle {
+  display: inline-flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.adminHint {
+  margin-top: 10px;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+/* Invite modal */
+.modalOverlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.10);
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  z-index: 80;
+}
+
+.modalCard {
+  width: 560px;
+  max-width: 100%;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  box-shadow: var(--shadow-md);
+  overflow: hidden;
+}
+
+.modalHeader {
+  padding: 14px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.modalTitle {
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.modalSub {
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.modalBody {
+  padding: 12px 14px 14px;
+}
+
+.modalFooter {
+  padding: 12px 14px 14px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+@media (max-width: 1100px) {
+  .formGrid {
+    grid-template-columns: 1fr;
+  }
+  .pwRow {
+    grid-template-columns: 1fr;
+  }
+  .pwToggle {
+    margin-top: 0;
+  }
+  .pwGrid {
+    grid-template-columns: 1fr;
+  }
+}
+
