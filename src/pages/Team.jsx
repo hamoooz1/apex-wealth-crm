@@ -1,15 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Search, UserPlus, X, Save } from 'lucide-react'
+import { Search } from 'lucide-react'
 import './Team.css'
-import { useAuth } from '../contexts/AuthContext.jsx'
-import { fetchProfilesPageData, updateProfileById } from '../lib/queries.js'
+import { fetchTeamProfilesPageData } from '../lib/queries.js'
 import Avatar from '../components/ui/Avatar.jsx'
-
-function formatDate(iso) {
-  if (!iso) return '—'
-  const d = new Date(iso)
-  return d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: '2-digit' })
-}
 
 function roleLabel(role) {
   if (role === 'admin') return 'Admin'
@@ -17,17 +10,32 @@ function roleLabel(role) {
   return 'Advisor'
 }
 
-export default function Team() {
-  const { profile: me } = useAuth()
-  const canManage = me?.role === 'admin'
+function fmtMoney(n) {
+  const x = Number(n || 0)
+  if (!Number.isFinite(x)) return '$0'
+  try {
+    return new Intl.NumberFormat(undefined, {
+      style: 'currency',
+      currency: 'USD',
+      maximumFractionDigits: 0,
+    }).format(x)
+  } catch {
+    return `$${Math.round(x).toLocaleString()}`
+  }
+}
 
-  const [profiles, setProfiles] = useState([])
+function startOfMonth(d) {
+  const x = new Date(d)
+  x.setDate(1)
+  x.setHours(0, 0, 0, 0)
+  return x
+}
+
+export default function Team() {
   const [query, setQuery] = useState('')
-  const [selectedId, setSelectedId] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
-
-  const profilesMap = useMemo(() => new Map(profiles.map((p) => [p.id, p])), [profiles])
+  const [data, setData] = useState(null)
 
   useEffect(() => {
     let mounted = true
@@ -35,9 +43,9 @@ export default function Team() {
       setLoading(true)
       setError(null)
       try {
-        const rows = await fetchProfilesPageData()
+        const rows = await fetchTeamProfilesPageData()
         if (!mounted) return
-        setProfiles(rows)
+        setData(rows)
       } catch (e) {
         if (!mounted) return
         setError(e)
@@ -51,81 +59,137 @@ export default function Team() {
     }
   }, [])
 
+  const computed = useMemo(() => {
+    const profiles = (data?.profiles || []).filter((p) => p.is_active !== false)
+    const stages = (data?.pipeline_stages || []).filter((s) => s.is_active !== false)
+    const entries = data?.pipeline_entries || []
+    const meetings = data?.meetings || []
+    const clients = data?.clients || []
+
+    const stageNameById = new Map(stages.map((s) => [s.id, s.name]))
+    const isTerminalStage = (stageId) => {
+      const n = String(stageNameById.get(stageId) || '').toLowerCase()
+      return (
+        n.includes('closed won') ||
+        n.includes('closed lost') ||
+        n.includes('lost') ||
+        n.includes('not proceeding') ||
+        n.includes('no show') ||
+        n.includes('cancel')
+      )
+    }
+
+    const now = new Date()
+    const monthStart = startOfMonth(now)
+    const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 1)
+
+    const byAdvisor = new Map()
+    for (const p of profiles) {
+      byAdvisor.set(p.id, {
+        profile: p,
+        activePipelineValue: 0,
+        meetingsThisMonth: 0,
+        aumManaged: 0,
+        closedClients: 0,
+        notProceeding: 0,
+        totalOpps: 0,
+        byStageCount: new Map(stages.map((s) => [s.id, 0])),
+      })
+    }
+
+    for (const c of clients) {
+      const b = byAdvisor.get(c.advisor_id)
+      if (!b) continue
+      b.aumManaged += Number(c.aum || 0) || 0
+      b.closedClients += 1
+    }
+
+    for (const m of meetings) {
+      const b = byAdvisor.get(m.advisor_id)
+      if (!b) continue
+      const t = new Date(m.start_time)
+      if (t >= monthStart && t < monthEnd) b.meetingsThisMonth += 1
+    }
+
+    for (const e of entries) {
+      const b = byAdvisor.get(e.assigned_to)
+      if (!b) continue
+      b.totalOpps += 1
+      if (b.byStageCount.has(e.stage_id)) {
+        b.byStageCount.set(e.stage_id, (b.byStageCount.get(e.stage_id) || 0) + 1)
+      }
+
+      const stageName = String(stageNameById.get(e.stage_id) || '').toLowerCase()
+      if (!isTerminalStage(e.stage_id)) {
+        b.activePipelineValue += Number(e.value || 0) || 0
+      }
+      if (
+        stageName.includes('lost') ||
+        stageName.includes('not proceeding') ||
+        stageName.includes('no show') ||
+        stageName.includes('cancel')
+      ) {
+        b.notProceeding += 1
+      }
+    }
+
+    const stagePalette = [
+      { from: '#2563eb', to: '#3b82f6' },
+      { from: '#f59e0b', to: '#fbbf24' },
+      { from: '#fb923c', to: '#fdba74' },
+      { from: '#f472b6', to: '#fb7185' },
+      { from: '#a78bfa', to: '#c084fc' },
+      { from: '#34d399', to: '#22c55e' },
+      { from: '#0ea5e9', to: '#38bdf8' },
+    ]
+
+    const cards = Array.from(byAdvisor.values()).map((b) => {
+      // Team page conversion: clients / (clients + pipeline opportunities)
+      const denom = b.totalOpps + b.closedClients
+      const conversionRate = denom === 0 ? 0 : Math.round((b.closedClients / denom) * 100)
+
+      const stageRows = stages.map((s, idx) => {
+        const count = b.byStageCount.get(s.id) || 0
+        const colors = stagePalette[idx % stagePalette.length]
+        return { stage: s, count, colors }
+      })
+
+      const max = Math.max(0, ...stageRows.map((r) => r.count))
+      return {
+        profile: b.profile,
+        metrics: {
+          activePipelineValue: b.activePipelineValue,
+          meetingsThisMonth: b.meetingsThisMonth,
+          aumManaged: b.aumManaged,
+          closedClients: b.closedClients,
+          notProceeding: b.notProceeding,
+          conversionRate,
+        },
+        stageRows,
+        maxStageCount: max,
+      }
+    })
+
+    return { profiles, stages, cards }
+  }, [data])
+
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase()
-    if (!q) return profiles
-    return profiles.filter((p) => {
+    if (!q) return computed.cards
+    return computed.cards.filter(({ profile: p }) => {
       return (
-        p.full_name.toLowerCase().includes(q) ||
-        p.email.toLowerCase().includes(q)
+        String(p.full_name || '').toLowerCase().includes(q) ||
+        String(p.email || '').toLowerCase().includes(q)
       )
     })
-  }, [profiles, query])
-
-  const selected = useMemo(() => profilesMap.get(selectedId) || null, [profilesMap, selectedId])
-
-  // Drawer edit state (separate local state)
-  const [draft, setDraft] = useState(null)
-  const [dirty, setDirty] = useState(false)
-
-  useEffect(() => {
-    if (!selected) {
-      setDraft(null)
-      setDirty(false)
-      return
-    }
-    setDraft({
-      role: selected.role,
-      manager_id: selected.manager_id || '',
-      is_active: !!selected.is_active,
-    })
-    setDirty(false)
-  }, [selectedId]) // intentionally keyed by id
-
-  const hierarchy = useMemo(() => {
-    const managers = profiles.filter((p) => p.role === 'manager')
-    const advisors = profiles.filter((p) => p.role === 'advisor')
-    return managers.map((m) => ({
-      manager: m,
-      advisors: advisors.filter((a) => a.manager_id === m.id),
-    }))
-  }, [profiles])
-
-  function managerName(managerId) {
-    if (!managerId) return '—'
-    return profilesMap.get(managerId)?.full_name || '—'
-  }
-
-  function onOpen(p) {
-    setSelectedId(p.id)
-  }
-
-  function onClose() {
-    setSelectedId(null)
-  }
-
-  async function onSave() {
-    if (!selected || !draft) return
-    if (!canManage) return
-    try {
-      const updated = await updateProfileById(selected.id, {
-        role: draft.role,
-        manager_id: draft.manager_id || null,
-        is_active: !!draft.is_active,
-      })
-      setProfiles((prev) => prev.map((p) => (p.id === selected.id ? updated : p)))
-      setDirty(false)
-    } catch (e) {
-      setError(e)
-    }
-  }
+  }, [computed.cards, query])
 
   return (
     <div>
       <div className="pageHeader">
         <div>
           <h1 className="pageTitle">Team Profiles</h1>
-          <div className="pageSubtitle">Manage and view your team structure</div>
+          <div className="pageSubtitle">Active employees and performance metrics</div>
         </div>
 
         <div className="teamHeaderRight">
@@ -137,229 +201,96 @@ export default function Team() {
               placeholder="Search name or email…"
             />
           </div>
-          <button className="btnPrimary" type="button" disabled={!canManage}>
-            <UserPlus size={16} />
-            Add Team Member
-          </button>
         </div>
       </div>
 
-      <div className="teamStack">
-        <div className="card teamCard">
-          <div className="cardHeader">
-            <div className="cardTitle">Team</div>
-            <div className="muted">
-              {loading ? 'Loading…' : `${filtered.length} members`}
-            </div>
-          </div>
+      {error ? (
+        <div className="card" style={{ padding: 14, marginBottom: 12 }}>
+          <div className="muted">Error: {error.message || 'Failed to load team profiles.'}</div>
+        </div>
+      ) : null}
 
-          <div className="teamTableWrap">
-            <table className="teamTable">
-              <thead>
-                <tr>
-                  <th />
-                  <th>Name</th>
-                  <th>Email</th>
-                  <th>Role</th>
-                  <th>Manager</th>
-                  <th>Status</th>
-                  <th>Created</th>
-                  <th>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {loading ? (
-                  <tr>
-                    <td colSpan={8} className="teamEmpty">
-                      Loading team…
-                    </td>
-                  </tr>
-                ) : error ? (
-                  <tr>
-                    <td colSpan={8} className="teamEmpty">
-                      Failed to load profiles. Check RLS + that your user has a `profiles` row.
-                    </td>
-                  </tr>
-                ) : (
-                  filtered.map((p) => (
-                  <tr key={p.id} onClick={() => onOpen(p)} role="button">
-                    <td>
-                      <Avatar name={p.full_name} src={p.avatar_url || ''} size="md" />
-                    </td>
-                    <td className="teamName">{p.full_name}</td>
-                    <td className="teamMuted">{p.email}</td>
-                    <td>
+      <div className="teamCards">
+        {loading ? (
+          <div className="card" style={{ padding: 14 }}>
+            <div className="muted">Loading team…</div>
+          </div>
+        ) : filtered.length === 0 ? (
+          <div className="card" style={{ padding: 14 }}>
+            <div className="muted">No active employees match your search.</div>
+          </div>
+        ) : (
+          filtered.map(({ profile: p, metrics, stageRows, maxStageCount }) => (
+            <div className="card teamPerfCard" key={p.id}>
+              <div className="teamPerfHeader">
+                <div className="teamPerfLeft">
+                  <Avatar name={p.full_name} src={p.avatar_url || ''} size="xl" />
+                  <div>
+                    <div className="teamPerfNameRow">
+                      <div className="teamPerfName">{p.full_name}</div>
                       <span className={['roleBadge', `role-${p.role}`].join(' ')}>
                         {roleLabel(p.role)}
                       </span>
-                    </td>
-                    <td className="teamMuted">{managerName(p.manager_id)}</td>
-                    <td>
-                      <span className={['statusBadge', p.is_active ? 'on' : 'off'].join(' ')}>
-                        {p.is_active ? 'Active' : 'Inactive'}
-                      </span>
-                    </td>
-                    <td className="teamMuted">{formatDate(p.created_at)}</td>
-                    <td>
-                      <div className="rowActions" onClick={(e) => e.stopPropagation()}>
-                        <button className="btnSecondary" type="button" onClick={() => onOpen(p)}>
-                          View
-                        </button>
-                        <button className="btnSecondary" type="button" onClick={() => onOpen(p)} disabled={!canManage}>
-                          Edit
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                  ))
-                )}
-                {!loading && !error && filtered.length === 0 ? (
-                  <tr>
-                    <td colSpan={8} className="teamEmpty">
-                      No team members match your search.
-                    </td>
-                  </tr>
-                ) : null}
-              </tbody>
-            </table>
-          </div>
-        </div>
-
-        <div className="card teamCard">
-          <div className="cardHeader">
-            <div className="cardTitle">Hierarchy</div>
-            <div className="muted">Managers and downline advisors</div>
-          </div>
-          <div className="hierBody">
-            {hierarchy.length === 0 ? (
-              <div className="emptyState">No managers found</div>
-            ) : (
-              hierarchy.map((h) => (
-                <div className="hierGroup" key={h.manager.id}>
-                  <div className="hierManager">
-                    <Avatar name={h.manager.full_name} src={h.manager.avatar_url || ''} size="sm" />
-                    <div>
-                      <div className="hierName">{h.manager.full_name}</div>
-                      <div className="hierMeta">{h.manager.email}</div>
                     </div>
-                    <span className="roleBadge role-manager">Manager</span>
+                    <div className="teamPerfEmail">{p.email}</div>
                   </div>
-                  <div className="hierChildren">
-                    {h.advisors.length === 0 ? (
-                      <div className="hierEmpty">No advisors</div>
-                    ) : (
-                      h.advisors.map((a) => (
-                        <div className="hierChild" key={a.id} onClick={() => onOpen(a)} role="button">
-                          <Avatar name={a.full_name} src={a.avatar_url || ''} size="sm" />
-                          <div className="hierName">{a.full_name}</div>
-                          <span className="roleBadge role-advisor">Advisor</span>
+                </div>
+              </div>
+
+              <div className="teamPerfMetrics">
+                <div className="teamPerfMetric">
+                  <div className="teamPerfMetricValue">{fmtMoney(metrics.activePipelineValue)}</div>
+                  <div className="teamPerfMetricLabel">Active Pipeline</div>
+                </div>
+                <div className="teamPerfMetric">
+                  <div className="teamPerfMetricValue">{metrics.meetingsThisMonth}</div>
+                  <div className="teamPerfMetricLabel">Meetings This Month</div>
+                </div>
+                <div className="teamPerfMetric">
+                  <div className="teamPerfMetricValue">{fmtMoney(metrics.aumManaged)}</div>
+                  <div className="teamPerfMetricLabel">AUM Managed</div>
+                </div>
+                <div className="teamPerfMetric">
+                  <div className="teamPerfMetricValue">{metrics.closedClients}</div>
+                  <div className="teamPerfMetricLabel">Closed Clients</div>
+                </div>
+                <div className="teamPerfMetric">
+                  <div className="teamPerfMetricValue">{metrics.notProceeding}</div>
+                  <div className="teamPerfMetricLabel">Not Proceeding</div>
+                </div>
+                <div className="teamPerfMetric">
+                  <div className="teamPerfMetricValue">{metrics.conversionRate}%</div>
+                  <div className="teamPerfMetricLabel">Conversion Rate</div>
+                </div>
+              </div>
+
+              <div className="teamPerfBreakdown">
+                <div className="teamPerfBreakdownTitle">Pipeline Breakdown</div>
+                <div className="teamPerfBreakdownRows">
+                  {stageRows.map((r) => {
+                    const w =
+                      maxStageCount === 0 ? 0 : Math.max(6, Math.round((r.count / maxStageCount) * 100))
+                    return (
+                      <div className="teamPerfStageRow" key={r.stage.id}>
+                        <div className="teamPerfStageName">{r.stage.name}</div>
+                        <div className="teamPerfStageBarWrap">
+                          <div
+                            className="teamPerfStageBar"
+                            style={{
+                              width: `${w}%`,
+                              background: `linear-gradient(90deg, ${r.colors.from}, ${r.colors.to})`,
+                            }}
+                          />
                         </div>
-                      ))
-                    )}
-                  </div>
+                        <div className="teamPerfStageCount">{r.count}</div>
+                      </div>
+                    )
+                  })}
                 </div>
-              ))
-            )}
-          </div>
-        </div>
-      </div>
-
-      <div className={['drawerOverlay', selected ? 'open' : null].filter(Boolean).join(' ')}>
-        <div className={['drawer', selected ? 'open' : null].filter(Boolean).join(' ')}>
-          <div className="drawerHeader">
-            <div>
-              <div className="drawerTitle">Profile Detail</div>
-              <div className="drawerSub">View and update team member settings</div>
-            </div>
-            <button className="iconBtn" type="button" onClick={onClose} aria-label="Close">
-              <X size={16} />
-            </button>
-          </div>
-
-          {selected && draft ? (
-            <div className="drawerBody">
-              <div className="drawerHero">
-                <Avatar name={selected.full_name} src={selected.avatar_url || ''} size="lg" />
-                <div>
-                  <div className="drawerName">{selected.full_name}</div>
-                  <div className="drawerEmail">{selected.email}</div>
-                </div>
-              </div>
-
-              <div className="drawerGrid">
-                <label className="field">
-                  <div className="fieldLabel">Role</div>
-                  <select
-                    className="fieldInput"
-                    value={draft.role}
-                    disabled={!canManage}
-                    onChange={(e) => {
-                      setDraft((d) => ({ ...d, role: e.target.value }))
-                      setDirty(true)
-                    }}
-                  >
-                    <option value="admin">admin</option>
-                    <option value="manager">manager</option>
-                    <option value="advisor">advisor</option>
-                  </select>
-                </label>
-
-                <label className="field">
-                  <div className="fieldLabel">Manager</div>
-                  <select
-                    className="fieldInput"
-                    value={draft.manager_id}
-                    disabled={!canManage}
-                    onChange={(e) => {
-                      setDraft((d) => ({ ...d, manager_id: e.target.value }))
-                      setDirty(true)
-                    }}
-                  >
-                    <option value="">None</option>
-                    {profiles
-                      .filter((p) => p.role !== 'advisor' && p.id !== selected.id)
-                      .map((p) => (
-                        <option key={p.id} value={p.id}>
-                          {p.full_name}
-                        </option>
-                      ))}
-                  </select>
-                </label>
-
-                <label className="field fieldRow">
-                  <div>
-                    <div className="fieldLabel">Active</div>
-                    <div className="fieldHint">Controls access to the CRM</div>
-                  </div>
-                  <input
-                    type="checkbox"
-                    checked={draft.is_active}
-                    disabled={!canManage}
-                    onChange={(e) => {
-                      setDraft((d) => ({ ...d, is_active: e.target.checked }))
-                      setDirty(true)
-                    }}
-                  />
-                </label>
-
-                <div className="field">
-                  <div className="fieldLabel">Created</div>
-                  <div className="fieldRead">{formatDate(selected.created_at)}</div>
-                </div>
-              </div>
-
-              <div className="drawerFooter">
-                <button className="btnSecondary" type="button" onClick={onClose}>
-                  Cancel
-                </button>
-                <button className="btnPrimary" type="button" onClick={onSave} disabled={!dirty || !canManage}>
-                  <Save size={16} />
-                  Save
-                </button>
               </div>
             </div>
-          ) : null}
-        </div>
+          ))
+        )}
       </div>
     </div>
   )

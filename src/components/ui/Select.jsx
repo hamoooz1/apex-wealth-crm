@@ -1,4 +1,5 @@
 import { useEffect, useId, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { ChevronDown } from 'lucide-react'
 
 function cn(...xs) {
@@ -21,6 +22,7 @@ export default function Select({
   const menuRef = useRef(null)
   const [open, setOpen] = useState(false)
   const [activeIndex, setActiveIndex] = useState(-1)
+  const [menuPos, setMenuPos] = useState(null)
 
   const selected = useMemo(() => {
     return options.find((o) => String(o.value) === String(value)) || null
@@ -37,6 +39,35 @@ export default function Select({
     document.addEventListener('mousedown', onDoc)
     return () => document.removeEventListener('mousedown', onDoc)
   }, [open])
+
+  useEffect(() => {
+    if (!open) return
+
+    function compute() {
+      const el = btnRef.current
+      if (!el) return
+      const r = el.getBoundingClientRect()
+      const width = Math.max(160, r.width)
+      let left = align === 'right' ? r.right - width : r.left
+      const top = r.bottom + 6
+      const maxHeight = Math.max(160, window.innerHeight - top - 10)
+      left = Math.max(8, Math.min(left, window.innerWidth - width - 8))
+      setMenuPos({
+        left,
+        top,
+        width,
+        maxHeight,
+      })
+    }
+
+    compute()
+    window.addEventListener('resize', compute)
+    window.addEventListener('scroll', compute, true)
+    return () => {
+      window.removeEventListener('resize', compute)
+      window.removeEventListener('scroll', compute, true)
+    }
+  }, [open, align])
 
   useEffect(() => {
     if (!open) return
@@ -109,36 +140,46 @@ export default function Select({
         <ChevronDown size={16} className={cn('uiSelectChevron', open && 'isOpen')} />
       </button>
 
-      {open ? (
-        <div
-          ref={menuRef}
-          id={`${id}-menu`}
-          role="listbox"
-          className={cn('uiSelectMenu', `align-${align}`, menuClassName)}
-        >
-          {options.map((o, idx) => {
-            const isSelected = String(o.value) === String(value)
-            const isActive = idx === activeIndex
-            return (
-              <button
-                key={String(o.value)}
-                type="button"
-                role="option"
-                aria-selected={isSelected}
-                className={cn(
-                  'uiSelectOption',
-                  isSelected && 'isSelected',
-                  isActive && 'isActive',
-                )}
-                onMouseEnter={() => setActiveIndex(idx)}
-                onClick={() => commit(o.value)}
-              >
-                <span>{o.label}</span>
-              </button>
-            )
-          })}
-        </div>
-      ) : null}
+      {open && menuPos
+        ? createPortal(
+            <div
+              ref={menuRef}
+              id={`${id}-menu`}
+              role="listbox"
+              className={cn('uiSelectMenu', 'uiSelectMenuPortal', menuClassName)}
+              style={{
+                position: 'fixed',
+                left: `${menuPos.left}px`,
+                top: `${menuPos.top}px`,
+                width: `${menuPos.width}px`,
+                maxHeight: `${menuPos.maxHeight}px`,
+              }}
+            >
+              {options.map((o, idx) => {
+                const isSelected = String(o.value) === String(value)
+                const isActive = idx === activeIndex
+                return (
+                  <button
+                    key={String(o.value)}
+                    type="button"
+                    role="option"
+                    aria-selected={isSelected}
+                    className={cn(
+                      'uiSelectOption',
+                      isSelected && 'isSelected',
+                      isActive && 'isActive',
+                    )}
+                    onMouseEnter={() => setActiveIndex(idx)}
+                    onClick={() => commit(o.value)}
+                  >
+                    <span>{o.label}</span>
+                  </button>
+                )
+              })}
+            </div>,
+            document.body,
+          )
+        : null}
     </div>
   )
 }

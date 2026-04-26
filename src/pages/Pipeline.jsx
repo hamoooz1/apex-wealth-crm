@@ -1,28 +1,29 @@
-import { DollarSign, Percent, Clock3, Plus, Save, X } from 'lucide-react'
+import { ChevronDown, ChevronRight, Plus, Save, Search, X } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { fetchPipelinePageData } from '../lib/queries.js'
 import { supabase } from '../lib/supabaseClient.js'
 import Select from '../components/ui/Select.jsx'
-
-function formatCurrency(n) {
-  const v = Number(n || 0)
-  return v.toLocaleString(undefined, {
-    style: 'currency',
-    currency: 'USD',
-    maximumFractionDigits: 0,
-  })
-}
+import Avatar from '../components/ui/Avatar.jsx'
 
 function shortDate(iso) {
   const d = new Date(iso)
   return d.toLocaleDateString(undefined, { month: 'short', day: '2-digit' })
 }
 
+function initials(name) {
+  const parts = String(name || '')
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean)
+  const a = (parts[0] || '').slice(0, 1).toUpperCase()
+  const b = (parts[1] || '').slice(0, 1).toUpperCase()
+  return (a + b) || '?'
+}
+
 export default function Pipeline() {
   const [state, setState] = useState({ loading: true, error: null, data: null })
-  const [editingId, setEditingId] = useState(null)
-  const [editDraft, setEditDraft] = useState(null)
-  const [saving, setSaving] = useState(false)
+  const [expandedStageId, setExpandedStageId] = useState(null)
+  const [search, setSearch] = useState('')
   const [createOpen, setCreateOpen] = useState(false)
   const [createStageId, setCreateStageId] = useState(null)
   const [createDraft, setCreateDraft] = useState(null)
@@ -69,16 +70,10 @@ export default function Pipeline() {
       const p = profilesMap.get(profileId)
       return p ? p.full_name : 'Unknown'
     }
+    const advisor = (profileId) => profilesMap.get(profileId) || null
 
     const stagesOptions = stages.map((s) => ({ value: s.id, label: s.name }))
-    const leadsOptions = leads
-      .slice()
-      .sort((a, b) => String(a.first_name || '').localeCompare(String(b.first_name || '')))
-      .map((l) => ({
-        value: l.id,
-        label: `${l.first_name || ''} ${l.last_name || ''}`.trim() || l.email || 'Lead',
-      }))
-    return { stages, stagesOptions, pipeline_entries, leadName, advisorName }
+    return { stages, stagesOptions, pipeline_entries, leadName, advisorName, advisor }
   }, [state.data, state.loading, state.error])
 
   const leadsOptions = useMemo(() => {
@@ -202,40 +197,42 @@ export default function Pipeline() {
     }
   }
 
-  function openEdit(e) {
-    setEditingId(e.id)
-    setEditDraft({
-      value: e.value ?? '',
-      probability: e.probability ?? '',
-    })
-  }
-
-  function closeEdit() {
-    setEditingId(null)
-    setEditDraft(null)
-  }
-
-  async function saveEdit(entryId) {
-    if (!editDraft) return
-    setSaving(true)
-    try {
-      await updateEntry(entryId, {
-        value: editDraft.value === '' ? null : Number(editDraft.value),
-        probability:
-          editDraft.probability === '' ? null : Number(editDraft.probability),
-      })
-      closeEdit()
-    } finally {
-      setSaving(false)
+  const grouped = useMemo(() => {
+    const entries = computed.pipeline_entries || []
+    const byStage = new Map()
+    for (const stage of computed.stages) byStage.set(stage.id, [])
+    for (const e of entries) {
+      const list = byStage.get(e.stage_id)
+      if (list) list.push(e)
     }
-  }
+    for (const [k, list] of byStage) {
+      byStage.set(
+        k,
+        list
+          .slice()
+          .sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime()),
+      )
+    }
+    const maxCount = Math.max(0, ...Array.from(byStage.values()).map((l) => l.length))
+    const topCount = (computed.stages[0] ? (byStage.get(computed.stages[0].id) || []).length : 0) || 0
+    return { byStage, maxCount, topCount }
+  }, [computed.pipeline_entries, computed.stages])
+
+  const stagePalette = [
+    { from: '#f59e0b', to: '#fbbf24' },
+    { from: '#fb923c', to: '#fdba74' },
+    { from: '#f472b6', to: '#fb7185' },
+    { from: '#a78bfa', to: '#c084fc' },
+    { from: '#60a5fa', to: '#38bdf8' },
+    { from: '#34d399', to: '#22c55e' },
+  ]
 
   return (
     <div>
       <div className="pageHeader">
         <div>
-          <h1 className="pageTitle">Pipeline</h1>
-          <div className="pageSubtitle">Track opportunities by stage</div>
+          <h1 className="pageTitle">Sales Funnel</h1>
+          <div className="pageSubtitle">Click any stage to see the prospects inside.</div>
         </div>
       </div>
 
@@ -245,125 +242,146 @@ export default function Pipeline() {
         </div>
       ) : null}
 
-      <div className="pipelineBoard">
-        {computed.stages.map((stage) => {
-          const items = (computed.pipeline_entries || [])
-            .filter((e) => e.stage_id === stage.id)
-            .slice()
-            .sort(
-              (a, b) =>
-                new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime(),
-            )
+      <div className="card funnelCard">
+        <div className="funnelTopRow">
+          <div className="funnelSearch">
+            <Search size={14} />
+            <input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search by name…"
+              aria-label="Search prospects"
+            />
+          </div>
+        </div>
 
-          return (
-            <div className="kanbanCol" key={stage.id}>
-              <div className="kanbanColHeader">
-                <div className="kanbanColTitle">{stage.name}</div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <div className="pillCount">{items.length} cards</div>
+        <div className="funnelGridHeader" role="row">
+          <div className="funnelGridHeaderCell">Stage</div>
+          <div className="funnelGridHeaderCell">Prospects</div>
+          <div className="funnelGridHeaderCell funnelGridHeaderCellRight">Rate</div>
+        </div>
+
+        {state.loading ? (
+          <div className="emptyState">Loading funnel…</div>
+        ) : computed.stages.length === 0 ? (
+          <div className="emptyState">No stages configured</div>
+        ) : (
+          <div className="funnelList">
+            {computed.stages.map((stage, idx) => {
+              const items = grouped.byStage.get(stage.id) || []
+              const isOpen = expandedStageId === stage.id
+              const widthPct =
+                grouped.maxCount === 0
+                  ? 0
+                  : Math.max(6, Math.round((items.length / grouped.maxCount) * 100))
+              const ratePct =
+                grouped.topCount === 0 ? 0 : Math.round((items.length / grouped.topCount) * 100)
+
+              const q = search.trim().toLowerCase()
+              const filteredItems =
+                q.length === 0
+                  ? items
+                  : items.filter((e) => computed.leadName(e.lead_id).toLowerCase().includes(q))
+
+              const colors = stagePalette[idx % stagePalette.length]
+
+              return (
+                <div key={stage.id} className="funnelStageItem">
                   <button
-                    className="iconBtn"
                     type="button"
-                    aria-label="Add pipeline entry"
-                    onClick={() => openCreate(stage.id)}
+                    className="funnelStageRow"
+                    onClick={() =>
+                      setExpandedStageId((cur) => (cur === stage.id ? null : stage.id))
+                    }
+                    aria-expanded={isOpen}
                   >
-                    <Plus size={16} />
-                  </button>
-                </div>
-              </div>
+                    <div className="funnelStageName">
+                      {isOpen ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+                      <span>{stage.name}</span>
+                    </div>
 
-              {state.loading ? (
-                <div className="emptyState">Loading pipeline…</div>
-              ) : state.error ? (
-                <div className="emptyState">Failed to load pipeline.</div>
-              ) : items.length === 0 ? (
-                <div className="emptyState">No opportunities</div>
-              ) : (
-                items.map((e) => (
-                  <div className="taskCard" key={e.id}>
-                    <div className="pipelineTitle">{computed.leadName(e.lead_id)}</div>
-                    <div className="pipelineSub">{computed.advisorName(e.assigned_to)}</div>
-                    <div className="taskMeta">
-                      <Select
-                        size="sm"
-                        value={e.stage_id}
-                        onChange={(next) => updateEntry(e.id, { stage_id: next })}
-                        options={computed.stagesOptions}
-                        className="pipelineSelect"
-                      />
-                      <span className="tag">
-                        <DollarSign size={14} />
-                        {editingId === e.id ? (
-                          <input
-                            className="inlineInput"
-                            style={{ minWidth: 90, height: 28 }}
-                            type="number"
-                            value={editDraft?.value ?? ''}
-                            onChange={(ev) =>
-                              setEditDraft((d) => ({ ...d, value: ev.target.value }))
-                            }
-                            placeholder="0"
-                          />
-                        ) : (
-                          formatCurrency(e.value)
-                        )}
-                      </span>
-                      <span className="tag">
-                        <Percent size={14} />
-                        {editingId === e.id ? (
-                          <input
-                            className="inlineInput"
-                            style={{ minWidth: 80, height: 28 }}
-                            type="number"
-                            value={editDraft?.probability ?? ''}
-                            onChange={(ev) =>
-                              setEditDraft((d) => ({ ...d, probability: ev.target.value }))
-                            }
-                            placeholder="0"
-                          />
-                        ) : (
-                          `${e.probability ?? 0}%`
-                        )}
-                      </span>
-                      <span className="tag">
-                        <Clock3 size={14} />
-                        {shortDate(e.updated_at)}
-                      </span>
-                      {editingId === e.id ? (
-                        <span style={{ display: 'inline-flex', gap: 8 }}>
-                          <button
-                            className="btnSecondary"
-                            type="button"
-                            onClick={closeEdit}
-                            disabled={saving}
-                          >
-                            Cancel
-                          </button>
-                          <button
-                            className="btnPrimary"
-                            type="button"
-                            onClick={() => saveEdit(e.id)}
-                            disabled={saving}
-                          >
-                            {saving ? 'Saving…' : 'Save'}
-                          </button>
-                        </span>
-                      ) : (
+                    <div className="funnelBarWrap" aria-hidden="true">
+                      <div
+                        className="funnelBar"
+                        style={{
+                          width: `${widthPct}%`,
+                          background: `linear-gradient(90deg, ${colors.from}, ${colors.to})`,
+                        }}
+                      >
+                        <span className="funnelBarCount">{items.length}</span>
+                      </div>
+                    </div>
+
+                    <div className="funnelRate">{ratePct}%</div>
+                  </button>
+
+                  {isOpen ? (
+                    <div className="funnelStageDetails">
+                      <div className="funnelStageActions">
                         <button
                           className="btnSecondary"
                           type="button"
-                          onClick={() => openEdit(e)}
+                          onClick={() => openCreate(stage.id)}
                         >
-                          Edit
+                          <Plus size={16} />
+                          Add opportunity
                         </button>
-                      )}
+                      </div>
+
+                      <div className="funnelTable">
+                        <div className="funnelTableHead">
+                          <div>Client</div>
+                          <div>Advisor</div>
+                          <div>Last activity</div>
+                          <div className="funnelTableRight">In stage</div>
+                        </div>
+
+                        {filteredItems.length === 0 ? (
+                          <div className="funnelEmpty">No prospects in this stage.</div>
+                        ) : (
+                          filteredItems.map((e) => {
+                            const name = computed.leadName(e.lead_id)
+                            return (
+                              <div className="funnelTableRow" key={e.id}>
+                                <div className="funnelClientCell">
+                                  <div className="funnelAvatar">{initials(name)}</div>
+                                  <div className="funnelClientName">{name}</div>
+                                </div>
+                                <div className="funnelAdvisorCell">
+                                  {(() => {
+                                    const a = computed.advisor(e.assigned_to)
+                                    const name = a?.full_name || 'Unassigned'
+                                    return (
+                                      <div className="funnelAdvisorPill">
+                                        <Avatar name={name} src={a?.avatar_url || ''} size="sm" />
+                                        <span className="funnelAdvisorName">{name}</span>
+                                      </div>
+                                    )
+                                  })()}
+                                </div>
+                                <div className="funnelActivityCell">{shortDate(e.updated_at)}</div>
+                                <div className="funnelTableRight">
+                                  <Select
+                                    size="sm"
+                                    value={e.stage_id}
+                                    onChange={(next) => updateEntry(e.id, { stage_id: next })}
+                                    options={computed.stagesOptions}
+                                    align="right"
+                                    className="pipelineSelect"
+                                  />
+                                </div>
+                              </div>
+                            )
+                          })
+                        )}
+                      </div>
                     </div>
-                  </div>
-                ))
-              )}
-            </div>
-          )
-        })}
+                  ) : null}
+                </div>
+              )
+            })}
+          </div>
+        )}
       </div>
 
       {createOpen && createDraft ? (

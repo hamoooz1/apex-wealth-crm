@@ -108,6 +108,32 @@ export async function fetchProfilesPageData() {
   return data || []
 }
 
+export async function fetchTeamProfilesPageData() {
+  const [profilesRes, clientsRes, meetingsRes, entriesRes, stagesRes] = await Promise.all([
+    supabase.from('profiles').select('*').order('created_at', { ascending: false }),
+    supabase.from('clients').select('*'),
+    supabase.from('meetings').select('*'),
+    supabase.from('pipeline_entries').select('*'),
+    supabase.from('pipeline_stages').select('*').order('sort_order', { ascending: true }),
+  ])
+
+  const err =
+    profilesRes.error ||
+    clientsRes.error ||
+    meetingsRes.error ||
+    entriesRes.error ||
+    stagesRes.error
+  if (err) throw err
+
+  return {
+    profiles: profilesRes.data || [],
+    clients: clientsRes.data || [],
+    meetings: meetingsRes.data || [],
+    pipeline_entries: entriesRes.data || [],
+    pipeline_stages: stagesRes.data || [],
+  }
+}
+
 export async function updateProfileById(profileId, patch) {
   const { data, error } = await supabase
     .from('profiles')
