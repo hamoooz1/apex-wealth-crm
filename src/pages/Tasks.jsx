@@ -1,9 +1,10 @@
-import { Plus, Calendar, Link2, Flag, Save, X, Pencil, ChevronDown } from 'lucide-react'
+import { Plus, Calendar, Link2, Flag, Save, X, Pencil } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { fetchTasksPageData } from '../lib/queries.js'
 import { fetchProfilesPageData } from '../lib/queries.js'
 import { supabase } from '../lib/supabaseClient.js'
 import { useAuth } from '../contexts/AuthContext.jsx'
+import Select from '../components/ui/Select.jsx'
 
 function linkedName(t, leadsMap, clientsMap) {
   if (t.client_id) {
@@ -27,6 +28,12 @@ const statusOptions = [
   { value: 'todo', label: 'To Do' },
   { value: 'in_progress', label: 'In Progress' },
   { value: 'done', label: 'Done' },
+]
+
+const priorityOptions = [
+  { value: 'low', label: 'Low' },
+  { value: 'medium', label: 'Medium' },
+  { value: 'high', label: 'High' },
 ]
 
 export default function Tasks() {
@@ -89,6 +96,36 @@ export default function Tasks() {
     { key: 'in_progress', title: 'In Progress', items: computed.inProgress || [] },
     { key: 'done', title: 'Done', items: computed.done || [] },
   ]
+
+  const assignOptions = useMemo(
+    () => [
+      { value: '', label: '—' },
+      ...profiles.map((p) => ({ value: p.id, label: p.full_name })),
+    ],
+    [profiles],
+  )
+
+  const leadOptions = useMemo(
+    () => [
+      { value: '', label: '—' },
+      ...(state.data?.leads || []).map((l) => ({
+        value: l.id,
+        label: `${l.first_name || ''} ${l.last_name || ''}`.trim() || l.email || 'Lead',
+      })),
+    ],
+    [state.data],
+  )
+
+  const clientOptions = useMemo(
+    () => [
+      { value: '', label: '—' },
+      ...(state.data?.clients || []).map((c) => ({
+        value: c.id,
+        label: `${c.first_name || ''} ${c.last_name || ''}`.trim() || c.email || 'Client',
+      })),
+    ],
+    [state.data],
+  )
 
   function openCreate() {
     setEditingId(null)
@@ -325,20 +362,13 @@ export default function Tasks() {
                     </div>
                     <div className="taskDesc">{t.description}</div>
                     <div className="taskMeta">
-                      <span className="tag">
-                        <ChevronDown size={14} />
-                        <select
-                          className="inlineSelect"
-                          value={t.status || 'todo'}
-                          onChange={(e) => quickSetStatus(t.id, e.target.value)}
-                        >
-                          {statusOptions.map((s) => (
-                            <option key={s.value} value={s.value}>
-                              {s.label}
-                            </option>
-                          ))}
-                        </select>
-                      </span>
+                      <Select
+                        size="sm"
+                        className="taskStatusSelect"
+                        value={t.status || 'todo'}
+                        onChange={(v) => quickSetStatus(t.id, v)}
+                        options={statusOptions}
+                      />
                       <span className={['tag', `priority-${t.priority}`].join(' ')}>
                         <Flag size={14} />
                         {priorityLabel(t.priority)}
@@ -407,36 +437,26 @@ export default function Tasks() {
 
                 <label className="sField">
                   <div className="sLabel">Status</div>
-                  <select
-                    className="sInput"
+                  <Select
                     value={draft.status}
-                    onChange={(e) => {
-                      setDraft((d) => ({ ...d, status: e.target.value }))
+                    onChange={(v) => {
+                      setDraft((d) => ({ ...d, status: v }))
                       setDirty(true)
                     }}
-                  >
-                    {statusOptions.map((s) => (
-                      <option key={s.value} value={s.value}>
-                        {s.label}
-                      </option>
-                    ))}
-                  </select>
+                    options={statusOptions}
+                  />
                 </label>
 
                 <label className="sField">
                   <div className="sLabel">Priority</div>
-                  <select
-                    className="sInput"
+                  <Select
                     value={draft.priority}
-                    onChange={(e) => {
-                      setDraft((d) => ({ ...d, priority: e.target.value }))
+                    onChange={(v) => {
+                      setDraft((d) => ({ ...d, priority: v }))
                       setDirty(true)
                     }}
-                  >
-                    <option value="low">low</option>
-                    <option value="medium">medium</option>
-                    <option value="high">high</option>
-                  </select>
+                    options={priorityOptions}
+                  />
                 </label>
 
                 <label className="sField">
@@ -454,59 +474,39 @@ export default function Tasks() {
 
                 <label className="sField">
                   <div className="sLabel">Assigned to</div>
-                  <select
-                    className="sInput"
+                  <Select
                     value={draft.assigned_to}
-                    onChange={(e) => {
-                      setDraft((d) => ({ ...d, assigned_to: e.target.value }))
+                    onChange={(v) => {
+                      setDraft((d) => ({ ...d, assigned_to: v }))
                       setDirty(true)
                     }}
-                  >
-                    <option value="">—</option>
-                    {profiles.map((p) => (
-                      <option key={p.id} value={p.id}>
-                        {p.full_name}
-                      </option>
-                    ))}
-                  </select>
+                    options={assignOptions}
+                    placeholder="Unassigned"
+                  />
                 </label>
 
                 <label className="sField">
                   <div className="sLabel">Linked lead</div>
-                  <select
-                    className="sInput"
+                  <Select
                     value={draft.lead_id}
-                    onChange={(e) => {
-                      setDraft((d) => ({ ...d, lead_id: e.target.value, client_id: '' }))
+                    onChange={(v) => {
+                      setDraft((d) => ({ ...d, lead_id: v, client_id: '' }))
                       setDirty(true)
                     }}
-                  >
-                    <option value="">—</option>
-                    {(state.data?.leads || []).map((l) => (
-                      <option key={l.id} value={l.id}>
-                        {l.first_name} {l.last_name}
-                      </option>
-                    ))}
-                  </select>
+                    options={leadOptions}
+                  />
                 </label>
 
                 <label className="sField">
                   <div className="sLabel">Linked client</div>
-                  <select
-                    className="sInput"
+                  <Select
                     value={draft.client_id}
-                    onChange={(e) => {
-                      setDraft((d) => ({ ...d, client_id: e.target.value, lead_id: '' }))
+                    onChange={(v) => {
+                      setDraft((d) => ({ ...d, client_id: v, lead_id: '' }))
                       setDirty(true)
                     }}
-                  >
-                    <option value="">—</option>
-                    {(state.data?.clients || []).map((c) => (
-                      <option key={c.id} value={c.id}>
-                        {c.first_name} {c.last_name}
-                      </option>
-                    ))}
-                  </select>
+                    options={clientOptions}
+                  />
                 </label>
               </div>
             </div>

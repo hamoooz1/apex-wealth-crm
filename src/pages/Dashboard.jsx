@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { fetchDashboardData } from '../lib/queries.js'
+import Avatar from '../components/ui/Avatar.jsx'
 
 import {
   ArrowUpRight,
@@ -10,6 +11,9 @@ import {
   LineChart,
   UsersRound,
   CalendarDays,
+  AlertTriangle,
+  CalendarClock,
+  Hourglass,
 } from 'lucide-react'
 
 import {
@@ -51,6 +55,70 @@ function formatDateTime(iso) {
   })
 }
 
+function formatDate(iso) {
+  if (!iso) return '—'
+  const d = new Date(iso)
+  return d.toLocaleDateString(undefined, {
+    month: 'short',
+    day: '2-digit',
+    year: 'numeric',
+  })
+}
+
+const DAY_MS = 1000 * 60 * 60 * 24
+
+function daysBetween(fromMs, toMs) {
+  return Math.round((toMs - fromMs) / DAY_MS)
+}
+
+function humanizeAction(action) {
+  const a = String(action || '')
+  const map = {
+    'lead.created': 'created a lead',
+    'lead.assigned': 'assigned a lead',
+    'lead.status_changed': 'changed lead status',
+    'lead.contact_updated': 'updated lead contact',
+    'lead.deleted': 'deleted a lead',
+
+    'pipeline.created': 'created an opportunity',
+    'pipeline.stage_changed': 'moved an opportunity stage',
+    'pipeline.assigned': 'assigned an opportunity',
+    'pipeline.value_changed': 'updated opportunity value',
+    'pipeline.probability_changed': 'updated opportunity probability',
+    'pipeline.deleted': 'deleted an opportunity',
+
+    'task.created': 'created a task',
+    'task.status_changed': 'changed task status',
+    'task.assigned': 'assigned a task',
+    'task.due_date_changed': 'updated task due date',
+    'task.priority_changed': 'updated task priority',
+    'task.deleted': 'deleted a task',
+
+    'client.created': 'created a client',
+    'client.aum_changed': 'updated client AUM',
+    'client.status_changed': 'changed client status',
+    'client.advisor_changed': 'changed client advisor',
+    'client.next_review_changed': 'updated next review date',
+    'client.contact_updated': 'updated client contact',
+    'client.deleted': 'deleted a client',
+
+    'meeting.created': 'scheduled a meeting',
+    'meeting.status_changed': 'updated meeting status',
+    'meeting.rescheduled': 'rescheduled a meeting',
+    'meeting.advisor_changed': 'reassigned a meeting',
+    'meeting.deleted': 'deleted a meeting',
+  }
+  return map[a] || a.replaceAll('_', ' ')
+}
+
+function formatFromTo(fromVal, toVal, { kind = 'text', fmt } = {}) {
+  const f = fromVal == null || fromVal === '' ? '—' : fromVal
+  const t = toVal == null || toVal === '' ? '—' : toVal
+  if (fmt) return `${fmt(f)} → ${fmt(t)}`
+  if (kind === 'number') return `${Number(f)} → ${Number(t)}`
+  return `${String(f)} → ${String(t)}`
+}
+
 export default function Dashboard() {
   const [state, setState] = useState({
     loading: true,
@@ -90,6 +158,8 @@ export default function Dashboard() {
 
     const leadsMap = new Map(leads.map((l) => [l.id, l]))
     const profilesMap = new Map(profiles.map((p) => [p.id, p]))
+    const clientsMap = new Map(clients.map((c) => [c.id, c]))
+    const stagesMap = new Map(pipeline_stages.map((s) => [s.id, s]))
 
     const newLeads = leads.filter((l) => {
       const created = new Date(l.created_at)
@@ -121,6 +191,39 @@ export default function Dashboard() {
         new Date(t.due_date).getTime() < new Date().setHours(0, 0, 0, 0)
       )
     }).length
+
+    const todayStart = new Date().setHours(0, 0, 0, 0)
+    const reviewHorizon = todayStart + 14 * DAY_MS
+
+    const overdueTasksList = tasks
+      .filter(
+        (t) =>
+          t.status !== 'done' &&
+          t.due_date &&
+          new Date(t.due_date).getTime() < todayStart,
+      )
+      .sort((a, b) => new Date(a.due_date) - new Date(b.due_date))
+
+    const upcomingReviews = clients
+      .filter(
+        (c) =>
+          c.next_review_date &&
+          new Date(c.next_review_date).getTime() <= reviewHorizon,
+      )
+      .sort((a, b) => new Date(a.next_review_date) - new Date(b.next_review_date))
+
+    const staleLeads = leads
+      .filter((l) => {
+        const status = String(l.status || '').toLowerCase()
+        if (status === 'converted' || status === 'lost') return false
+        const ts = new Date(l.updated_at || l.created_at).getTime()
+        return Date.now() - ts >= 14 * DAY_MS
+      })
+      .sort(
+        (a, b) =>
+          new Date(a.updated_at || a.created_at) -
+          new Date(b.updated_at || b.created_at),
+      )
 
     const stageCounts = pipeline_stages
       .filter((s) => s.is_active !== false)
@@ -157,9 +260,57 @@ export default function Dashboard() {
       return l ? `${l.first_name} ${l.last_name}` : 'Unknown Lead'
     }
 
+    const clientName = (clientId) => {
+      const c = clientsMap.get(clientId)
+      if (!c) return 'Unknown Client'
+      return `${c.first_name} ${c.last_name || ''}`.trim()
+    }
+
+    const stageName = (stageId) => stagesMap.get(stageId)?.name || '—'
+
     const profileName = (profileId) => {
       const p = profilesMap.get(profileId)
       return p ? p.full_name : 'Unknown'
+    }
+
+    const profile = (profileId) => profilesMap.get(profileId) || null
+
+    const activityMeta = (a) => {
+      const d = a?.details || {}
+      const action = String(a?.action || '')
+
+      if (action === 'pipeline.stage_changed') {
+        return `Stage: ${formatFromTo(stageName(d.from), stageName(d.to))}`
+      }
+      if (action === 'pipeline.value_changed') {
+        return `Value: ${formatFromTo(d.from, d.to, { fmt: (x) => formatCurrency(x) })}`
+      }
+      if (action === 'pipeline.probability_changed') {
+        return `Probability: ${formatFromTo(d.from, d.to)}%`
+      }
+      if (action === 'pipeline.assigned' || action === 'lead.assigned' || action === 'task.assigned' || action === 'client.advisor_changed' || action === 'meeting.advisor_changed') {
+        return `Assignee: ${formatFromTo(profileName(d.from), profileName(d.to))}`
+      }
+      if (action === 'lead.status_changed' || action === 'task.status_changed' || action === 'client.status_changed' || action === 'meeting.status_changed') {
+        return `Status: ${formatFromTo(d.from, d.to)}`
+      }
+      if (action === 'meeting.rescheduled') {
+        return `When: ${formatFromTo(d.from, d.to, { fmt: (x) => formatDateTime(x) })}`
+      }
+      if (action === 'client.aum_changed') {
+        return `AUM: ${formatFromTo(d.from, d.to, { fmt: (x) => formatCurrency(x) })}`
+      }
+      if (action === 'client.next_review_changed') {
+        return `Next review: ${formatFromTo(d.from, d.to)}`
+      }
+      if (action === 'task.due_date_changed') {
+        return `Due: ${formatFromTo(d.from, d.to)}`
+      }
+      if (action === 'task.priority_changed') {
+        return `Priority: ${formatFromTo(d.from, d.to)}`
+      }
+
+      return ''
     }
 
     return {
@@ -179,10 +330,18 @@ export default function Dashboard() {
       conversionRate,
       meetingsThisWeek,
       overdueTasks,
+      overdueTasksList,
+      upcomingReviews,
+      staleLeads,
+      todayStart,
       stageCounts,
       donutData,
       leadName,
+      clientName,
       profileName,
+      profile,
+      stageName,
+      activityMeta,
     }
   }, [state.data, state.loading, state.error])
 
@@ -274,6 +433,120 @@ export default function Dashboard() {
             </div>
           )
         })}
+      </div>
+
+      <div className="card actionCenter">
+        <div className="cardHeader">
+          <div className="cardTitle">Action Center</div>
+          <div className="muted">What needs your attention</div>
+        </div>
+        <div className="actionGrid">
+          <div className="actionCol">
+            <div className="actionColHead">
+              <span className="actionColIcon red">
+                <AlertTriangle size={15} />
+              </span>
+              <span className="actionColTitle">Overdue tasks</span>
+              <span className="actionCount">{(computed.overdueTasksList || []).length}</span>
+            </div>
+            <div className="actionList">
+              {state.loading ? (
+                <div className="actionEmpty">Loading…</div>
+              ) : (computed.overdueTasksList || []).length === 0 ? (
+                <div className="actionEmpty">Nothing overdue. Nice work.</div>
+              ) : (
+                (computed.overdueTasksList || []).slice(0, 5).map((t) => {
+                  const od = daysBetween(new Date(t.due_date).getTime(), computed.todayStart)
+                  return (
+                    <div className="actionItem" key={t.id}>
+                      <div className="actionItemMain">
+                        <div className="actionItemTitle">{t.title}</div>
+                        <div className="actionItemSub">
+                          {computed.profileName(t.assigned_to)} · due {formatDate(t.due_date)}
+                        </div>
+                      </div>
+                      <span className="actionPill red">{od}d late</span>
+                    </div>
+                  )
+                })
+              )}
+            </div>
+          </div>
+
+          <div className="actionCol">
+            <div className="actionColHead">
+              <span className="actionColIcon blue">
+                <CalendarClock size={15} />
+              </span>
+              <span className="actionColTitle">Reviews due</span>
+              <span className="actionCount">{(computed.upcomingReviews || []).length}</span>
+            </div>
+            <div className="actionList">
+              {state.loading ? (
+                <div className="actionEmpty">Loading…</div>
+              ) : (computed.upcomingReviews || []).length === 0 ? (
+                <div className="actionEmpty">No reviews in the next 14 days.</div>
+              ) : (
+                (computed.upcomingReviews || []).slice(0, 5).map((c) => {
+                  const due = daysBetween(computed.todayStart, new Date(c.next_review_date).setHours(0, 0, 0, 0))
+                  const overdue = due < 0
+                  return (
+                    <div className="actionItem" key={c.id}>
+                      <div className="actionItemMain">
+                        <div className="actionItemTitle">
+                          {`${c.first_name} ${c.last_name || ''}`.trim()}
+                        </div>
+                        <div className="actionItemSub">
+                          {computed.profileName(c.advisor_id)} · {formatDate(c.next_review_date)}
+                        </div>
+                      </div>
+                      <span className={['actionPill', overdue ? 'red' : 'blue'].join(' ')}>
+                        {overdue ? `${Math.abs(due)}d late` : due === 0 ? 'today' : `${due}d`}
+                      </span>
+                    </div>
+                  )
+                })
+              )}
+            </div>
+          </div>
+
+          <div className="actionCol">
+            <div className="actionColHead">
+              <span className="actionColIcon amber">
+                <Hourglass size={15} />
+              </span>
+              <span className="actionColTitle">Stale leads</span>
+              <span className="actionCount">{(computed.staleLeads || []).length}</span>
+            </div>
+            <div className="actionList">
+              {state.loading ? (
+                <div className="actionEmpty">Loading…</div>
+              ) : (computed.staleLeads || []).length === 0 ? (
+                <div className="actionEmpty">No leads going cold.</div>
+              ) : (
+                (computed.staleLeads || []).slice(0, 5).map((l) => {
+                  const idle = daysBetween(
+                    new Date(l.updated_at || l.created_at).getTime(),
+                    Date.now(),
+                  )
+                  return (
+                    <div className="actionItem" key={l.id}>
+                      <div className="actionItemMain">
+                        <div className="actionItemTitle">
+                          {`${l.first_name} ${l.last_name || ''}`.trim()}
+                        </div>
+                        <div className="actionItemSub">
+                          {computed.profileName(l.assigned_to)} · no activity {idle}d
+                        </div>
+                      </div>
+                      <span className="actionPill amber">{idle}d</span>
+                    </div>
+                  )
+                })
+              )}
+            </div>
+          </div>
+        </div>
       </div>
 
       <div className="dashLower">
@@ -371,17 +644,34 @@ export default function Dashboard() {
                     <div className="activityMain">
                       <div className="activityTitle">
                         <span className="activityActor">
-                          {computed.profileName(a.actor_id)}
-                        </span>
-                        <span className="activityAction">{a.action}</span>
-                        {a.lead_id ? (
-                          <span className="activityTarget">
-                            {computed.leadName(a.lead_id)}
+                          <span className="activityActorChip">
+                            <Avatar
+                              name={computed.profileName(a.actor_id)}
+                              src={computed.profile(a.actor_id)?.avatar_url || ''}
+                              size="sm"
+                            />
+                            <span className="activityActorName">
+                              {computed.profileName(a.actor_id)}
+                            </span>
                           </span>
+                        </span>
+                        <span className="activityAction">{humanizeAction(a.action)}</span>
+                        {a.client_id ? (
+                          <span className="activityTarget">
+                            {computed.clientName(a.client_id)}
+                          </span>
+                        ) : a.lead_id ? (
+                          <span className="activityTarget">{computed.leadName(a.lead_id)}</span>
                         ) : null}
                       </div>
                       <div className="activityMeta">
-                        {formatDateTime(a.created_at)}
+                        <span>{formatDateTime(a.created_at)}</span>
+                        {computed.activityMeta(a) ? (
+                          <>
+                            <span className="activitySep">•</span>
+                            <span className="activityDetail">{computed.activityMeta(a)}</span>
+                          </>
+                        ) : null}
                       </div>
                     </div>
                     <div className="activityValue">

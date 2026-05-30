@@ -26,7 +26,7 @@ const navSections = [
       { to: '/leads', label: 'Leads', icon: UserRoundSearch },
       { to: '/pipeline', label: 'Pipeline', icon: KanbanSquare },
       { to: '/clients', label: 'Clients', icon: Briefcase },
-      { to: null, label: 'Calendar', icon: CalendarDays, disabled: true },
+      { to: '/calendar', label: 'Calendar', icon: CalendarDays },
       { to: '/tasks', label: 'Tasks', icon: ListTodo },
     ],
   },
@@ -40,10 +40,19 @@ const navSections = [
   },
 ]
 
-export default function Sidebar() {
+export default function Sidebar({ open = false, onClose }) {
   const { profile, signOut } = useAuth()
   return (
-    <aside className="sidebar">
+    <>
+      <div
+        className={['sidebarOverlay', open ? 'isOpen' : null].filter(Boolean).join(' ')}
+        aria-hidden={open ? 'false' : 'true'}
+        onClick={onClose}
+      />
+      <aside
+        className={['sidebar', open ? 'isMobileOpen' : null].filter(Boolean).join(' ')}
+        aria-label="Primary navigation"
+      >
       <div className="sidebarTop">
         <img className="brandLogo" src={apexLogo} alt="Apex Wealth CRM" />
       </div>
@@ -70,6 +79,7 @@ export default function Sidebar() {
                   <NavLink
                     key={item.to}
                     to={item.to}
+                    onClick={open ? onClose : undefined}
                     className={({ isActive }) =>
                       ['navItem', isActive ? 'navItemActive' : null]
                         .filter(Boolean)
@@ -110,6 +120,7 @@ export default function Sidebar() {
         </div>
       </div>
     </aside>
+    </>
   )
 }
 

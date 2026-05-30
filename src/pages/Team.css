@@ -2,6 +2,7 @@
   display: flex;
   align-items: center;
   gap: 10px;
+  flex-wrap: wrap;
 }
 
 .teamSearch {
@@ -212,6 +213,30 @@
 @media (max-width: 980px) {
   .teamPerfMetrics {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 720px) {
+  .teamHeaderRight {
+    width: 100%;
+  }
+
+  .teamSearch {
+    flex: 1 1 220px;
+    width: 100%;
+  }
+
+  .teamSearch input {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .teamPerfMetrics {
+    grid-template-columns: 1fr;
+  }
+
+  .teamPerfStageRow {
+    grid-template-columns: 110px 1fr 28px;
   }
 }
 

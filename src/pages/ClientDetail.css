@@ -1,0 +1,193 @@
+.backLink {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--muted);
+  text-decoration: none;
+}
+
+.backLink:hover {
+  color: var(--text);
+}
+
+.cdHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 18px 20px;
+  margin-top: 12px;
+  flex-wrap: wrap;
+}
+
+.cdIdentity {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.cdAvatar {
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-weight: 700;
+  font-size: 18px;
+  color: #fff;
+  background: linear-gradient(135deg, var(--blue), #1e3a8a);
+}
+
+.cdName {
+  font-family: var(--font-display, inherit);
+  font-size: 22px;
+  font-weight: 700;
+  line-height: 1.1;
+}
+
+.cdSubRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 6px;
+  font-size: 13px;
+}
+
+.cdHeaderRight {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+}
+
+.cdAum {
+  text-align: right;
+}
+
+.cdAumLabel {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+
+.cdAumValue {
+  font-size: 20px;
+  font-weight: 700;
+}
+
+.cdFacts {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 16px;
+  padding: 16px 20px;
+  margin-top: 12px;
+}
+
+.cdFactLabel {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  margin-bottom: 4px;
+}
+
+.cdFactValue {
+  font-size: 14px;
+  font-weight: 500;
+  word-break: break-word;
+}
+
+.cdEditCard {
+  padding: 18px 20px;
+  margin-top: 12px;
+}
+
+.cdEditActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.cdGrid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 16px;
+  margin-top: 16px;
+}
+
+.cdPanel {
+  padding: 16px;
+}
+
+.cdPanelHead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+  font-size: 14px;
+  margin-bottom: 12px;
+}
+
+.cdCount {
+  margin-left: auto;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 7px;
+  border-radius: 11px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--border-2, rgba(0, 0, 0, 0.06));
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.cdList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.cdListItem {
+  padding: 10px 0;
+  border-top: 1px solid var(--border);
+}
+
+.cdListItem:first-child {
+  border-top: none;
+}
+
+.cdItemMain {
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.cdItemMeta {
+  font-size: 12px;
+  color: var(--muted);
+  margin-top: 2px;
+}
+
+.cdItemStatus {
+  text-transform: capitalize;
+}
+
+.cdEmpty {
+  padding: 8px 0;
+  font-size: 13px;
+}
+
+@media (max-width: 900px) {
+  .cdGrid {
+    grid-template-columns: 1fr;
+  }
+  .cdFacts {
+    grid-template-columns: 1fr;
+  }
+}

@@ -5,6 +5,12 @@ import { fetchProfilesPageData } from '../lib/queries.js'
 import { supabase } from '../lib/supabaseClient.js'
 import { useAuth } from '../contexts/AuthContext.jsx'
 import { confettiBurst } from '../lib/confetti.js'
+import Select from '../components/ui/Select.jsx'
+import {
+  addDaysDate,
+  runLeadCreatedAutomations,
+  runLeadConvertedAutomations,
+} from '../lib/automations.js'
 
 import './Leads.css'
 
@@ -39,6 +45,11 @@ const leadStatusOptions = [
   'converted',
 ]
 
+const leadStatusSelectOptions = leadStatusOptions.map((s) => ({
+  value: s,
+  label: s.charAt(0).toUpperCase() + s.slice(1),
+}))
+
 async function convertLeadToClient({ leadId, patchLead, leadRow }) {
   // If client already exists for this lead, keep it idempotent.
   const { data: existing, error: existingErr } = await supabase
@@ -47,6 +58,8 @@ async function convertLeadToClient({ leadId, patchLead, leadRow }) {
     .eq('lead_id', leadId)
     .maybeSingle()
   if (existingErr) throw existingErr
+
+  let clientId = existing?.id || null
 
   if (!existing) {
     const clientPayload = {
@@ -58,12 +71,18 @@ async function convertLeadToClient({ leadId, patchLead, leadRow }) {
       advisor_id: leadRow.assigned_to || null,
       aum: null,
       status: 'active',
-      next_review_date: null,
+      // Schedule the first review ~90 days out so it surfaces instead of being forgotten.
+      next_review_date: addDaysDate(90),
       created_at: new Date().toISOString(),
     }
 
-    const { error: insertErr } = await supabase.from('clients').insert(clientPayload)
+    const { data: createdClient, error: insertErr } = await supabase
+      .from('clients')
+      .insert(clientPayload)
+      .select('id')
+      .maybeSingle()
     if (insertErr) throw insertErr
+    clientId = createdClient?.id || null
   }
 
   const { data: updatedLead, error: updErr } = await supabase
@@ -73,7 +92,7 @@ async function convertLeadToClient({ leadId, patchLead, leadRow }) {
     .select('*')
     .maybeSingle()
   if (updErr) throw updErr
-  return updatedLead
+  return { updatedLead, clientId }
 }
 
 export default function Leads() {
@@ -135,6 +154,16 @@ export default function Leads() {
     })
   }, [leads, query])
 
+  const advisorOptions = useMemo(
+    () => [
+      { value: '', label: '—' },
+      ...profiles
+        .filter((p) => p.role === 'advisor' || p.role === 'manager' || p.role === 'admin')
+        .map((p) => ({ value: p.id, label: p.full_name })),
+    ],
+    [profiles],
+  )
+
   function advisorName(id) {
     if (!id) return '—'
     return profilesMap.get(id)?.full_name || '—'
@@ -186,7 +215,7 @@ export default function Leads() {
         }
         const isConverting = patch.status === 'converted' && prev?.status !== 'converted'
         if (isConverting) {
-          const updatedLead = await convertLeadToClient({
+          const { updatedLead, clientId } = await convertLeadToClient({
             leadId: editingId,
             patchLead: patch,
             leadRow: { ...prev, ...patch },
@@ -195,6 +224,7 @@ export default function Leads() {
           setLeads((prevList) =>
             prevList.map((l) => (l.id === editingId ? updatedLead : l)),
           )
+          await runLeadConvertedAutomations({ lead: updatedLead, clientId })
         } else {
           const { data, error } = await supabase
             .from('leads')
@@ -223,13 +253,14 @@ export default function Leads() {
             .maybeSingle()
           if (createErr) throw createErr
 
-          const updatedLead = await convertLeadToClient({
+          const { updatedLead, clientId } = await convertLeadToClient({
             leadId: createdLead.id,
             patchLead: { status: 'converted', updated_at: new Date().toISOString() },
             leadRow: createdLead,
           })
           confettiBurst()
           setLeads((prevList) => [updatedLead, ...prevList])
+          await runLeadConvertedAutomations({ lead: updatedLead, clientId })
         } else {
           const { data, error } = await supabase
             .from('leads')
@@ -238,6 +269,7 @@ export default function Leads() {
             .maybeSingle()
           if (error) throw error
           setLeads((prevList) => [data, ...prevList])
+          await runLeadCreatedAutomations(data)
         }
       }
       setDirty(false)
@@ -410,40 +442,25 @@ export default function Leads() {
                 </label>
                 <label className="sField">
                   <div className="sLabel">Status</div>
-                  <select
-                    className="sInput"
+                  <Select
                     value={draft.status}
-                    onChange={(e) => {
-                      setDraft((d) => ({ ...d, status: e.target.value }))
+                    onChange={(v) => {
+                      setDraft((d) => ({ ...d, status: v }))
                       setDirty(true)
                     }}
-                  >
-                    {leadStatusOptions.map((s) => (
-                      <option key={s} value={s}>
-                        {s}
-                      </option>
-                    ))}
-                  </select>
+                    options={leadStatusSelectOptions}
+                  />
                 </label>
                 <label className="sField">
                   <div className="sLabel">Assigned advisor</div>
-                  <select
-                    className="sInput"
+                  <Select
                     value={draft.assigned_to}
-                    onChange={(e) => {
-                      setDraft((d) => ({ ...d, assigned_to: e.target.value }))
+                    onChange={(v) => {
+                      setDraft((d) => ({ ...d, assigned_to: v }))
                       setDirty(true)
                     }}
-                  >
-                    <option value="">—</option>
-                    {profiles
-                      .filter((p) => p.role === 'advisor' || p.role === 'manager' || p.role === 'admin')
-                      .map((p) => (
-                        <option key={p.id} value={p.id}>
-                          {p.full_name}
-                        </option>
-                      ))}
-                  </select>
+                    options={advisorOptions}
+                  />
                 </label>
                 <label className="sField" style={{ gridColumn: '1 / -1' }}>
                   <div className="sLabel">Notes</div>

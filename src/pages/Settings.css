@@ -1,4 +1,62 @@
-.settingsStack {
+.settingsShell {
+  display: grid;
+  gap: 12px;
+}
+
+.settingsNav {
+  padding: 8px;
+  border-radius: 16px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+}
+
+.settingsNavTop {
+  position: sticky;
+  top: 62px;
+  z-index: 12;
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: thin;
+}
+
+.settingsNavTop::-webkit-scrollbar {
+  height: 8px;
+}
+
+.settingsNavTop::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.35);
+  border-radius: 999px;
+}
+
+.settingsTab {
+  border: 1px solid transparent;
+  background: transparent;
+  border-radius: 12px;
+  padding: 10px 10px;
+  font-size: 12px;
+  font-weight: 750;
+  color: #0f172a;
+  cursor: pointer;
+  text-align: center;
+  white-space: nowrap;
+  flex: 0 0 auto;
+}
+
+.settingsTab:hover {
+  background: #fbfbfc;
+  border-color: var(--border-2);
+}
+
+.settingsTab.isActive {
+  background: rgba(37, 99, 235, 0.08);
+  border-color: rgba(37, 99, 235, 0.18);
+  color: #1d4ed8;
+}
+
+.settingsPanel {
   display: grid;
   gap: 12px;
 }
@@ -44,6 +102,24 @@
   font-size: 12px;
   outline: none;
   box-shadow: var(--shadow-sm);
+  transition: border-color 140ms ease, box-shadow 140ms ease, transform 120ms ease;
+}
+
+.sInput:focus {
+  border-color: rgba(37, 99, 235, 0.35);
+  box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.08);
+}
+
+.sInput[readonly] {
+  background: #fbfbfc;
+}
+
+.sInput textarea,
+textarea.sInput {
+  height: auto;
+  padding: 10px 12px;
+  resize: vertical;
+  line-height: 1.5;
 }
 
 .sReadRow {
@@ -67,6 +143,7 @@
   border: 1px solid var(--border);
   font-size: 11px;
   font-weight: 800;
+  background: rgba(255, 255, 255, 0.65);
 }
 
 .settingsFooter {
@@ -75,19 +152,11 @@
   padding-top: 12px;
 }
 
-.avatarRow {
-  display: flex;
+.settingsFooterSplit {
+  justify-content: space-between;
   align-items: center;
-  gap: 14px;
-  padding: 12px;
-  border-radius: 16px;
-  border: 1px solid var(--border);
-  background: #fbfbfc;
-}
-
-.avatarActions {
-  display: grid;
-  gap: 8px;
+  gap: 10px;
+  flex-wrap: wrap;
 }
 
 .sToggleRow {
@@ -100,6 +169,48 @@
   border-radius: 14px;
   border: 1px solid var(--border);
   background: #fbfbfc;
+}
+
+.settingsRow {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 12px;
+  align-items: center;
+  padding: 12px;
+  border-radius: 16px;
+  border: 1px solid var(--border);
+  background: #fbfbfc;
+}
+
+.settingsRowMain {
+  min-width: 0;
+}
+
+.settingsRowTitle {
+  font-size: 12px;
+  font-weight: 850;
+  color: #0f172a;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.settingsRowSub {
+  margin-top: 3px;
+  font-size: 12px;
+  color: var(--muted);
+  word-break: break-word;
+}
+
+.settingsRowRight {
+  display: inline-flex;
+  justify-content: flex-end;
+}
+
+.settingsUploadBtn {
+  display: inline-flex;
+  gap: 8px;
+  align-items: center;
 }
 
 .pwRow {
@@ -259,6 +370,10 @@ table.adminTable {
 }
 
 @media (max-width: 1100px) {
+  .settingsNavTop {
+    top: 58px;
+  }
+
   .formGrid {
     grid-template-columns: 1fr;
   }

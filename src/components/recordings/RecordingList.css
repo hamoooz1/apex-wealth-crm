@@ -1,0 +1,81 @@
+.recList {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.recCard {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px 14px;
+  background: var(--surface-2, rgba(0, 0, 0, 0.02));
+}
+
+.recHead {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.recTopic {
+  font-weight: 600;
+}
+
+.recMeta {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 10px;
+  white-space: nowrap;
+}
+
+.recWhen,
+.recDur {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.recLinks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+}
+
+.recLink {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--blue);
+  text-decoration: none;
+}
+
+.recLink:hover {
+  text-decoration: underline;
+}
+
+.recSummary {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+
+.recSummaryHead {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-bottom: 6px;
+}
+
+.recSummaryBody {
+  font-size: 13px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+}

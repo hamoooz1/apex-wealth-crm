@@ -8,9 +8,11 @@ import Dashboard from './pages/Dashboard.jsx'
 import Tasks from './pages/Tasks.jsx'
 import Pipeline from './pages/Pipeline.jsx'
 import Clients from './pages/Clients.jsx'
+import ClientDetail from './pages/ClientDetail.jsx'
 import Leads from './pages/Leads.jsx'
 import Team from './pages/Team.jsx'
 import Settings from './pages/Settings.jsx'
+import Calendar from './pages/Calendar.jsx'
 import Auth from './pages/Auth.jsx'
 import { AuthProvider, useAuth } from './contexts/AuthContext.jsx'
 import { useEffect, useState } from 'react'
@@ -50,14 +52,20 @@ function AuthGate({ children }) {
 }
 
 function App() {
+  const [sidebarOpen, setSidebarOpen] = useState(false)
+
   return (
     <AuthProvider>
       <BrowserRouter>
         <AuthGate>
           <div className="appShell">
-            <Sidebar />
+            <Sidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} />
             <main className="appMain">
-              <Topbar />
+              <Topbar
+                onOpenSidebar={() => setSidebarOpen(true)}
+                onCloseSidebar={() => setSidebarOpen(false)}
+                sidebarOpen={sidebarOpen}
+              />
               <div className="appContent">
                 <Routes>
                   <Route path="/" element={<Navigate to="/dashboard" replace />} />
@@ -66,6 +74,8 @@ function App() {
                   <Route path="/tasks" element={<Tasks />} />
                   <Route path="/pipeline" element={<Pipeline />} />
                   <Route path="/clients" element={<Clients />} />
+                  <Route path="/clients/:id" element={<ClientDetail />} />
+                  <Route path="/calendar" element={<Calendar />} />
                   <Route path="/team" element={<Team />} />
                   <Route path="/settings" element={<Settings />} />
                   <Route path="*" element={<Navigate to="/dashboard" replace />} />

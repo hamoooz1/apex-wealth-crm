@@ -1,0 +1,356 @@
+.calendarCard {
+  padding: 14px;
+}
+
+.calendarToolbar {
+  display: flex;
+  gap: 12px;
+  align-items: flex-end;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+
+.calToolbarLeft {
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+/* View toggle (List / Month) */
+.calViewToggle {
+  display: inline-flex;
+  padding: 3px;
+  gap: 2px;
+  background: var(--border-2, rgba(2, 6, 23, 0.05));
+  border: 1px solid var(--border);
+  border-radius: 12px;
+}
+
+.calToggleBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 600;
+  padding: 7px 12px;
+  border-radius: 9px;
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease;
+}
+
+.calToggleBtn:hover {
+  color: var(--text);
+}
+
+.calToggleBtn.isActive {
+  background: var(--card, #fff);
+  color: var(--text);
+  box-shadow: var(--shadow-sm, 0 1px 2px rgba(2, 6, 23, 0.08));
+}
+
+/* Month navigation */
+.calMonthNav {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.calNavBtn {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border: 1px solid var(--border);
+  background: var(--card);
+  color: var(--text);
+  border-radius: 10px;
+  cursor: pointer;
+}
+
+.calNavBtn:hover {
+  background: rgba(2, 6, 23, 0.04);
+}
+
+.calTodayBtn {
+  height: 34px;
+  padding: 0 14px;
+  border: 1px solid var(--border);
+  background: var(--card);
+  color: var(--text);
+  border-radius: 10px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.calTodayBtn:hover {
+  background: rgba(2, 6, 23, 0.04);
+}
+
+.calMonthLabel {
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--text);
+  margin-left: 4px;
+}
+
+/* Month grid */
+.calMonthWrap {
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  overflow: hidden;
+}
+
+.calMonthGrid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+}
+
+.calWeekHead {
+  background: rgba(2, 6, 23, 0.02);
+  border-bottom: 1px solid var(--border);
+}
+
+.calWeekday {
+  padding: 10px 12px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+  text-align: left;
+}
+
+.calDayCell {
+  min-height: 116px;
+  padding: 6px 6px 8px;
+  border-right: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  background: var(--card, #fff);
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  transition: background 100ms ease;
+}
+
+.calDayCell:hover {
+  background: rgba(37, 99, 235, 0.035);
+}
+
+.calMonthBody .calDayCell:nth-child(7n) {
+  border-right: none;
+}
+
+.calMonthBody .calDayCell:nth-last-child(-n + 7) {
+  border-bottom: none;
+}
+
+.calDayOut {
+  background: rgba(2, 6, 23, 0.015);
+}
+
+.calDayOut .calDayNum {
+  color: var(--muted-2, #94a3b8);
+}
+
+.calDayTop {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.calDayNum {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+  line-height: 1;
+  padding: 3px;
+}
+
+.calDayNumToday {
+  display: inline-grid;
+  place-items: center;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 4px;
+  background: var(--blue, #2563eb);
+  color: #fff;
+  border-radius: 999px;
+}
+
+.calDayChips {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.evChip {
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+  width: 100%;
+  text-align: left;
+  border: none;
+  border-left: 3px solid var(--blue, #2563eb);
+  background: rgba(37, 99, 235, 0.1);
+  color: var(--text);
+  border-radius: 6px;
+  padding: 3px 6px;
+  font-size: 11px;
+  cursor: pointer;
+  overflow: hidden;
+}
+
+.evChip:hover {
+  filter: brightness(0.97);
+}
+
+.evTime {
+  font-weight: 700;
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.evTitle {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.evChip.evCalendly {
+  border-left-color: #6366f1;
+  background: rgba(99, 102, 241, 0.12);
+}
+
+.evChip.evZoom {
+  border-left-color: #2563eb;
+  background: rgba(37, 99, 235, 0.12);
+}
+
+.evChip.evManual {
+  border-left-color: #16a34a;
+  background: rgba(16, 185, 129, 0.12);
+}
+
+.evCanceled .evTitle {
+  text-decoration: line-through;
+  opacity: 0.7;
+}
+
+.evMore {
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+  text-align: left;
+  padding: 2px 6px;
+  cursor: pointer;
+  border-radius: 6px;
+}
+
+.evMore:hover {
+  background: rgba(2, 6, 23, 0.05);
+  color: var(--text);
+}
+
+@media (max-width: 720px) {
+  .calMonthWrap {
+    overflow-x: auto;
+  }
+
+  .calMonthGrid {
+    min-width: 720px;
+  }
+}
+
+.calField {
+  display: grid;
+  gap: 6px;
+}
+
+.calLabel {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.calSelect {
+  border: 1px solid var(--border);
+  background: var(--card);
+  color: var(--text);
+  border-radius: 10px;
+  padding: 10px 12px;
+  min-width: 200px;
+}
+
+.calSelectUi {
+  min-width: 200px;
+}
+
+.calHint {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.calendarTableWrap {
+  overflow: auto;
+  border-radius: 14px;
+  border: 1px solid var(--border);
+}
+
+.calendarTable {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 920px;
+}
+
+.calendarTable th,
+.calendarTable td {
+  padding: 12px 12px;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+  vertical-align: middle;
+}
+
+.calendarTable th {
+  font-size: 12px;
+  color: var(--muted);
+  font-weight: 600;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.tTitle {
+  font-weight: 600;
+}
+
+.srcBadge {
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.srcBadge.srcCalendly {
+  background: rgba(99, 102, 241, 0.12);
+  border-color: rgba(99, 102, 241, 0.35);
+}
+
+.srcBadge.srcZoom {
+  background: rgba(37, 99, 235, 0.12);
+  border-color: rgba(37, 99, 235, 0.4);
+}
+
+.srcBadge.srcManual {
+  background: rgba(16, 185, 129, 0.1);
+  border-color: rgba(16, 185, 129, 0.35);
+}
+

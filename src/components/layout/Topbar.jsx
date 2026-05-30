@@ -1,4 +1,4 @@
-import { Bell, RefreshCw } from 'lucide-react'
+import { Bell, Menu, RefreshCw, X } from 'lucide-react'
 import { useMemo, useState } from 'react'
 
 function formatLastSync(iso) {
@@ -11,13 +11,21 @@ function formatLastSync(iso) {
   return `${hrs}h ago`
 }
 
-export default function Topbar() {
+export default function Topbar({ onOpenSidebar, onCloseSidebar, sidebarOpen }) {
   const [lastSyncAt, setLastSyncAt] = useState(new Date().toISOString())
   const lastSyncLabel = useMemo(() => formatLastSync(lastSyncAt), [lastSyncAt])
 
   return (
     <div className="topbar">
       <div className="topbarLeft">
+        <button
+          className="mobileMenuBtn"
+          type="button"
+          aria-label={sidebarOpen ? 'Close menu' : 'Open menu'}
+          onClick={sidebarOpen ? onCloseSidebar : onOpenSidebar}
+        >
+          {sidebarOpen ? <X size={18} /> : <Menu size={18} />}
+        </button>
         <div className="searchWrap">
           <input
             className="searchInput"

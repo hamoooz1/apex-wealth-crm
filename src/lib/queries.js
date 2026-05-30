@@ -90,13 +90,45 @@ export async function fetchPipelinePageData() {
 }
 
 export async function fetchClientsPageData() {
-  const [clientsRes, profilesRes] = await Promise.all([
+  const [clientsRes, profilesRes, recordingsRes] = await Promise.all([
     supabase.from('clients').select('*').order('created_at', { ascending: false }),
     supabase.from('profiles').select('*'),
+    supabase.from('meeting_recordings').select('client_id'),
   ])
-  const err = clientsRes.error || profilesRes.error
+  const err = clientsRes.error || profilesRes.error || recordingsRes.error
   if (err) throw err
-  return { clients: clientsRes.data || [], profiles: profilesRes.data || [] }
+
+  const recordingCounts = {}
+  for (const r of recordingsRes.data || []) {
+    if (r.client_id) recordingCounts[r.client_id] = (recordingCounts[r.client_id] || 0) + 1
+  }
+
+  return {
+    clients: clientsRes.data || [],
+    profiles: profilesRes.data || [],
+    recordingCounts,
+  }
+}
+
+export async function fetchClientDetail(clientId) {
+  const [clientRes, profilesRes, meetingsRes, tasksRes] = await Promise.all([
+    supabase.from('clients').select('*').eq('id', clientId).maybeSingle(),
+    supabase.from('profiles').select('*'),
+    supabase.from('meetings').select('*').eq('client_id', clientId).order('start_time', { ascending: false }),
+    supabase
+      .from('tasks')
+      .select('*')
+      .eq('client_id', clientId)
+      .order('due_date', { ascending: true, nullsFirst: false }),
+  ])
+  const err = clientRes.error || profilesRes.error || meetingsRes.error || tasksRes.error
+  if (err) throw err
+  return {
+    client: clientRes.data || null,
+    profiles: profilesRes.data || [],
+    meetings: meetingsRes.data || [],
+    tasks: tasksRes.data || [],
+  }
 }
 
 export async function fetchProfilesPageData() {
@@ -134,6 +166,78 @@ export async function fetchTeamProfilesPageData() {
   }
 }
 
+export async function fetchCalendarPageData() {
+  const [profilesRes, leadsRes, clientsRes] = await Promise.all([
+    supabase.from('profiles').select('*').order('created_at', { ascending: false }),
+    supabase.from('leads').select('*').order('created_at', { ascending: false }),
+    supabase.from('clients').select('*').order('created_at', { ascending: false }),
+  ])
+  const err = profilesRes.error || leadsRes.error || clientsRes.error
+  if (err) throw err
+  return { profiles: profilesRes.data || [], leads: leadsRes.data || [], clients: clientsRes.data || [] }
+}
+
+export async function fetchMeetings({ from, to, advisorId = null } = {}) {
+  let q = supabase
+    .from('meetings')
+    .select('*')
+    .order('start_time', { ascending: true })
+
+  if (from) q = q.gte('start_time', from)
+  if (to) q = q.lte('start_time', to)
+  if (advisorId) q = q.eq('advisor_id', advisorId)
+
+  const { data, error } = await q
+  if (error) throw error
+  return data || []
+}
+
+export async function createMeeting(payload) {
+  const { data, error } = await supabase.from('meetings').insert(payload).select('*').maybeSingle()
+  if (error) throw error
+  return data || null
+}
+
+export async function updateMeetingById(meetingId, patch) {
+  const { data, error } = await supabase
+    .from('meetings')
+    .update(patch)
+    .eq('id', meetingId)
+    .select('*')
+    .maybeSingle()
+  if (error) throw error
+  return data || null
+}
+
+export async function deleteMeetingById(meetingId) {
+  const { error } = await supabase.from('meetings').delete().eq('id', meetingId)
+  if (error) throw error
+  return true
+}
+
+export async function getMeetingRecordings(meetingId) {
+  if (!meetingId) return []
+  const { data, error } = await supabase
+    .from('meeting_recordings')
+    .select('*')
+    .eq('meeting_id', meetingId)
+    .order('created_at', { ascending: false })
+  if (error) throw error
+  return data || []
+}
+
+export async function getClientRecordings(clientId) {
+  if (!clientId) return []
+  const { data, error } = await supabase
+    .from('meeting_recordings')
+    .select('*')
+    .eq('client_id', clientId)
+    .order('recording_start', { ascending: false, nullsFirst: false })
+    .order('created_at', { ascending: false })
+  if (error) throw error
+  return data || []
+}
+
 export async function updateProfileById(profileId, patch) {
   const { data, error } = await supabase
     .from('profiles')
@@ -149,6 +253,28 @@ export async function createProfileRow(payload) {
   const { data, error } = await supabase
     .from('profiles')
     .insert(payload)
+    .select('*')
+    .maybeSingle()
+  if (error) throw error
+  return data || null
+}
+
+export async function getMyPreferences(userId) {
+  if (!userId) return null
+  const { data, error } = await supabase
+    .from('user_preferences')
+    .select('*')
+    .eq('user_id', userId)
+    .maybeSingle()
+  if (error) throw error
+  return data || null
+}
+
+export async function saveMyPreferences(userId, patch) {
+  if (!userId) throw new Error('Missing user id for preferences.')
+  const { data, error } = await supabase
+    .from('user_preferences')
+    .upsert({ user_id: userId, ...patch }, { onConflict: 'user_id' })
     .select('*')
     .maybeSingle()
   if (error) throw error

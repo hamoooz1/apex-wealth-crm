@@ -2,6 +2,7 @@
   display: flex;
   align-items: center;
   gap: 10px;
+  flex-wrap: wrap;
 }
 
 .leadsSearch {
@@ -24,6 +25,22 @@
   font-size: 12px;
   width: 220px;
   color: var(--text);
+}
+
+@media (max-width: 720px) {
+  .leadsHeaderRight {
+    width: 100%;
+  }
+
+  .leadsSearch {
+    flex: 1 1 220px;
+    width: 100%;
+  }
+
+  .leadsSearch input {
+    width: 100%;
+    min-width: 0;
+  }
 }
 
 .leadsTable .avatar {

@@ -2,10 +2,19 @@ import { useEffect, useMemo, useState } from 'react'
 import { Eye, EyeOff, Plus, Save, ShieldCheck, Upload } from 'lucide-react'
 import './Settings.css'
 import { useAuth } from '../contexts/AuthContext.jsx'
-import { createProfileRow, fetchProfilesPageData, updateProfileById } from '../lib/queries.js'
+import {
+  createProfileRow,
+  fetchProfilesPageData,
+  updateProfileById,
+  getMyPreferences,
+  saveMyPreferences,
+} from '../lib/queries.js'
+import { getMyZoomConnection, startZoomConnect, disconnectZoom } from '../lib/zoom.js'
+import { syncCalendly } from '../lib/calendly.js'
 import { supabase } from '../lib/supabaseClient.js'
 import { inviteUser } from '../lib/invite.js'
 import Avatar from '../components/ui/Avatar.jsx'
+import Select from '../components/ui/Select.jsx'
 
 function roleLabel(role) {
   if (role === 'admin') return 'Admin'
@@ -13,9 +22,32 @@ function roleLabel(role) {
   return 'Advisor'
 }
 
+const roleOptions = [
+  { value: 'admin', label: 'Admin' },
+  { value: 'manager', label: 'Manager' },
+  { value: 'advisor', label: 'Advisor' },
+]
+
 export default function Settings() {
   const { profile, user, refreshProfile, profileLoading, profileError } = useAuth()
   const isAdmin = profile?.role === 'admin'
+  const [activeTab, setActiveTab] = useState('profile')
+
+  // Land on the Integrations tab after an OAuth redirect (?zoom=connected|error or ?calendly=...)
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    const zoom = params.get('zoom')
+    const calendly = params.get('calendly')
+    if (zoom || calendly) {
+      setActiveTab('integrations')
+      if (zoom === 'error') setZoomError(new Error(params.get('message') || 'Zoom connection failed.'))
+      params.delete('zoom')
+      params.delete('calendly')
+      params.delete('message')
+      const qs = params.toString()
+      window.history.replaceState({}, '', `${window.location.pathname}${qs ? `?${qs}` : ''}`)
+    }
+  }, [])
 
   // Section 1: My Profile
   const [myProfile, setMyProfile] = useState({
@@ -58,13 +90,15 @@ export default function Settings() {
   const pwDirty = pw.current || pw.next || pw.confirm
   const pwValid = pwDirty && !pwMismatch && pw.next.length >= 8 && pw.current.length > 0
 
-  // Section 3: Preferences
+  // Section 3: Preferences (persisted in user_preferences)
   const [prefs, setPrefs] = useState({
     email_notifications: true,
     task_reminders: true,
     weekly_summary: false,
   })
   const [savedPrefs, setSavedPrefs] = useState(prefs)
+  const [prefsSaving, setPrefsSaving] = useState(false)
+  const [prefsError, setPrefsError] = useState(null)
   const prefsDirty = useMemo(() => {
     return (
       prefs.email_notifications !== savedPrefs.email_notifications ||
@@ -73,7 +107,186 @@ export default function Settings() {
     )
   }, [prefs, savedPrefs])
 
-  // Section 4: Team Management (Admin only)
+  useEffect(() => {
+    let mounted = true
+    async function loadPrefs() {
+      if (!profile?.id) return
+      try {
+        const row = await getMyPreferences(profile.id)
+        if (!mounted || !row) return
+        const next = {
+          email_notifications: row.email_notifications,
+          task_reminders: row.task_reminders,
+          weekly_summary: row.weekly_summary,
+        }
+        setPrefs(next)
+        setSavedPrefs(next)
+      } catch (e) {
+        if (mounted) setPrefsError(e)
+      }
+    }
+    loadPrefs()
+    return () => {
+      mounted = false
+    }
+  }, [profile?.id])
+
+  // Section 4: Calendly
+  const [calendlyConn, setCalendlyConn] = useState(null)
+  const [calendlyLoading, setCalendlyLoading] = useState(false)
+  const [calendlyError, setCalendlyError] = useState(null)
+
+  async function loadCalendlyConnection(userId) {
+    if (!userId) return null
+    const { data, error } = await supabase
+      .from('calendly_connections')
+      .select('*')
+      .eq('user_id', userId)
+      .is('revoked_at', null)
+      .maybeSingle()
+    if (error) throw error
+    return data || null
+  }
+
+  useEffect(() => {
+    let mounted = true
+    async function load() {
+      if (!profile?.id) {
+        setCalendlyConn(null)
+        setCalendlyError(null)
+        return
+      }
+      setCalendlyLoading(true)
+      setCalendlyError(null)
+      try {
+        const row = await loadCalendlyConnection(profile.id)
+        if (!mounted) return
+        setCalendlyConn(row)
+      } catch (e) {
+        if (!mounted) return
+        setCalendlyConn(null)
+        setCalendlyError(e)
+      } finally {
+        if (mounted) setCalendlyLoading(false)
+      }
+    }
+    load()
+    return () => {
+      mounted = false
+    }
+  }, [profile?.id])
+
+  async function onConnectCalendly() {
+    setCalendlyError(null)
+    setCalendlyLoading(true)
+    try {
+      const { data, error } = await supabase.functions.invoke('calendly-oauth-start')
+      if (error) throw error
+      const url = data?.authorize_url
+      if (!url) throw new Error('Missing authorize_url from calendly-oauth-start.')
+      window.location.assign(url)
+    } catch (e) {
+      setCalendlyError(e)
+      setCalendlyLoading(false)
+    }
+  }
+
+  async function onDisconnectCalendly() {
+    setCalendlyError(null)
+    setCalendlyLoading(true)
+    try {
+      const { error } = await supabase.functions.invoke('calendly-disconnect', { body: {} })
+      if (error) throw error
+      const row = await loadCalendlyConnection(profile?.id)
+      setCalendlyConn(row)
+    } catch (e) {
+      setCalendlyError(e)
+    } finally {
+      setCalendlyLoading(false)
+    }
+  }
+
+  const [calendlySyncing, setCalendlySyncing] = useState(false)
+  const [calendlySyncMsg, setCalendlySyncMsg] = useState(null)
+
+  async function onSyncCalendly() {
+    setCalendlyError(null)
+    setCalendlySyncMsg(null)
+    setCalendlySyncing(true)
+    try {
+      const res = await syncCalendly()
+      const added = res?.inserted || 0
+      const updated = res?.updated || 0
+      setCalendlySyncMsg(
+        `Synced ${res?.events || 0} event${res?.events === 1 ? '' : 's'} · ${added} added, ${updated} updated.`,
+      )
+    } catch (e) {
+      setCalendlyError(e)
+    } finally {
+      setCalendlySyncing(false)
+    }
+  }
+
+  // Section 4b: Zoom
+  const [zoomConn, setZoomConn] = useState(null)
+  const [zoomLoading, setZoomLoading] = useState(false)
+  const [zoomError, setZoomError] = useState(null)
+
+  useEffect(() => {
+    let mounted = true
+    async function load() {
+      if (!profile?.id) {
+        setZoomConn(null)
+        setZoomError(null)
+        return
+      }
+      setZoomLoading(true)
+      setZoomError(null)
+      try {
+        const row = await getMyZoomConnection(profile.id)
+        if (!mounted) return
+        setZoomConn(row)
+      } catch (e) {
+        if (!mounted) return
+        setZoomConn(null)
+        setZoomError(e)
+      } finally {
+        if (mounted) setZoomLoading(false)
+      }
+    }
+    load()
+    return () => {
+      mounted = false
+    }
+  }, [profile?.id])
+
+  async function onConnectZoom() {
+    setZoomError(null)
+    setZoomLoading(true)
+    try {
+      const url = await startZoomConnect()
+      window.location.assign(url)
+    } catch (e) {
+      setZoomError(e)
+      setZoomLoading(false)
+    }
+  }
+
+  async function onDisconnectZoom() {
+    setZoomError(null)
+    setZoomLoading(true)
+    try {
+      await disconnectZoom()
+      const row = await getMyZoomConnection(profile?.id)
+      setZoomConn(row)
+    } catch (e) {
+      setZoomError(e)
+    } finally {
+      setZoomLoading(false)
+    }
+  }
+
+  // Section 5: Team Management (Admin only)
   const [team, setTeam] = useState([])
   const [teamLoading, setTeamLoading] = useState(false)
   const [teamError, setTeamError] = useState(null)
@@ -177,8 +390,22 @@ export default function Settings() {
     }
   }
 
-  function onSavePrefs() {
-    setSavedPrefs(prefs)
+  async function onSavePrefs() {
+    if (!profile?.id) return
+    setPrefsError(null)
+    setPrefsSaving(true)
+    try {
+      await saveMyPreferences(profile.id, {
+        email_notifications: prefs.email_notifications,
+        task_reminders: prefs.task_reminders,
+        weekly_summary: prefs.weekly_summary,
+      })
+      setSavedPrefs(prefs)
+    } catch (e) {
+      setPrefsError(e)
+    } finally {
+      setPrefsSaving(false)
+    }
   }
 
   useEffect(() => {
@@ -231,28 +458,93 @@ export default function Settings() {
         </div>
       </div>
 
-      <div className="settingsStack">
-        {/* Section 1 */}
-        <div className="card settingsCard">
-          <div className="cardHeader">
-            <div className="cardTitle">My Profile</div>
-            <div className="muted">Account details</div>
-          </div>
-          <div className="settingsBody">
-            {profileLoading ? <div className="inlineHint">Loading profile…</div> : null}
-            {profileError ? (
-              <div className="inlineError">Failed to load profile. Make sure a `profiles` row exists.</div>
-            ) : null}
-            {profileSaveError ? (
-              <div className="inlineError">{profileSaveError.message || 'Failed to save profile.'}</div>
-            ) : null}
-            <div className="formGrid">
-              <div className="sField" style={{ gridColumn: '1 / -1' }}>
-                <div className="sLabel">Profile picture</div>
-                <div className="avatarRow">
+      <div className="settingsShell">
+        <div className="settingsNav settingsNavTop" role="tablist" aria-label="Settings sections">
+          <button
+            type="button"
+            className={['settingsTab', activeTab === 'profile' ? 'isActive' : null].filter(Boolean).join(' ')}
+            onClick={() => setActiveTab('profile')}
+            role="tab"
+            aria-selected={activeTab === 'profile'}
+          >
+            Profile
+          </button>
+          <button
+            type="button"
+            className={['settingsTab', activeTab === 'security' ? 'isActive' : null].filter(Boolean).join(' ')}
+            onClick={() => setActiveTab('security')}
+            role="tab"
+            aria-selected={activeTab === 'security'}
+          >
+            Security
+          </button>
+          <button
+            type="button"
+            className={['settingsTab', activeTab === 'preferences' ? 'isActive' : null].filter(Boolean).join(' ')}
+            onClick={() => setActiveTab('preferences')}
+            role="tab"
+            aria-selected={activeTab === 'preferences'}
+          >
+            Preferences
+          </button>
+          <button
+            type="button"
+            className={['settingsTab', activeTab === 'integrations' ? 'isActive' : null].filter(Boolean).join(' ')}
+            onClick={() => setActiveTab('integrations')}
+            role="tab"
+            aria-selected={activeTab === 'integrations'}
+          >
+            Integrations
+          </button>
+          {isAdmin ? (
+            <button
+              type="button"
+              className={['settingsTab', activeTab === 'team' ? 'isActive' : null].filter(Boolean).join(' ')}
+              onClick={() => setActiveTab('team')}
+              role="tab"
+              aria-selected={activeTab === 'team'}
+            >
+              Team
+            </button>
+          ) : null}
+        </div>
+
+        <section className="settingsPanel">
+          {activeTab === 'profile' ? (
+            <div className="card settingsCard">
+              <div className="cardHeader">
+                <div>
+                  <div className="cardTitle">Profile</div>
+                  <div className="muted">Account details</div>
+                </div>
+              </div>
+              <div className="settingsBody">
+                {profileLoading ? <div className="inlineHint">Loading profile…</div> : null}
+                {profileError ? (
+                  <div className="inlineError">Failed to load profile. Make sure a `profiles` row exists.</div>
+                ) : null}
+                {profileSaveError ? (
+                  <div className="inlineError">{profileSaveError.message || 'Failed to save profile.'}</div>
+                ) : null}
+
+                <div className="settingsRow">
                   <Avatar name={myProfile.full_name || 'Apex User'} src={myProfile.avatar_url || ''} size="lg" />
-                  <div className="avatarActions">
-                    <label className="btnSecondary" style={{ display: 'inline-flex', gap: 8, alignItems: 'center' }}>
+                  <div className="settingsRowMain">
+                    <div className="settingsRowTitle">{myProfile.full_name || 'Apex User'}</div>
+                    <div className="settingsRowSub">{myProfile.email || user?.email || '—'}</div>
+                  </div>
+                  <div className="settingsRowRight">
+                    <span className={['sBadge', `role-${myProfile.role}`].join(' ')}>
+                      <ShieldCheck size={14} />
+                      {roleLabel(myProfile.role)}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="formGrid" style={{ marginTop: 12 }}>
+                  <div className="sField" style={{ gridColumn: '1 / -1' }}>
+                    <div className="sLabel">Profile picture</div>
+                    <label className="btnSecondary settingsUploadBtn">
                       <Upload size={16} />
                       Upload
                       <input
@@ -262,204 +554,331 @@ export default function Settings() {
                         onChange={(e) => uploadAvatar(e.target.files?.[0])}
                       />
                     </label>
-                    <div className="muted" style={{ fontSize: 11 }}>
-                      PNG/JPG, square preferred.
+                    <div className="sHint">PNG/JPG, square preferred.</div>
+                  </div>
+
+                  <label className="sField">
+                    <div className="sLabel">Full Name</div>
+                    <input
+                      className="sInput"
+                      value={myProfile.full_name}
+                      onChange={(e) => setMyProfile((p) => ({ ...p, full_name: e.target.value }))}
+                    />
+                  </label>
+
+                  <label className="sField">
+                    <div className="sLabel">Email</div>
+                    <input className="sInput" value={myProfile.email} readOnly />
+                  </label>
+
+                  {isAdmin ? (
+                    <label className="sToggleRow">
+                      <div>
+                        <div className="sLabel">Active status</div>
+                        <div className="sHint">Only admins can change this for themselves</div>
+                      </div>
+                      <input
+                        type="checkbox"
+                        checked={myProfile.is_active}
+                        onChange={(e) => setMyProfile((p) => ({ ...p, is_active: e.target.checked }))}
+                      />
+                    </label>
+                  ) : null}
+                </div>
+
+                <div className="settingsFooter">
+                  <button
+                    className="btnPrimary"
+                    type="button"
+                    onClick={onSaveProfile}
+                    disabled={!profileDirty || savingProfile}
+                  >
+                    <Save size={16} />
+                    {savingProfile ? 'Saving…' : 'Save'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          ) : null}
+
+          {activeTab === 'security' ? (
+            <div className="card settingsCard">
+              <div className="cardHeader">
+                <div>
+                  <div className="cardTitle">Password</div>
+                  <div className="muted">Update your password</div>
+                </div>
+              </div>
+              <div className="settingsBody">
+                <div className="pwRow">
+                  <div className="pwGrid">
+                    <label className="sField">
+                      <div className="sLabel">Current password</div>
+                      <input
+                        className="sInput"
+                        type={showPw ? 'text' : 'password'}
+                        value={pw.current}
+                        onChange={(e) => setPw((x) => ({ ...x, current: e.target.value }))}
+                      />
+                    </label>
+                    <label className="sField">
+                      <div className="sLabel">New password</div>
+                      <input
+                        className="sInput"
+                        type={showPw ? 'text' : 'password'}
+                        value={pw.next}
+                        onChange={(e) => setPw((x) => ({ ...x, next: e.target.value }))}
+                      />
+                    </label>
+                    <label className="sField">
+                      <div className="sLabel">Confirm password</div>
+                      <input
+                        className="sInput"
+                        type={showPw ? 'text' : 'password'}
+                        value={pw.confirm}
+                        onChange={(e) => setPw((x) => ({ ...x, confirm: e.target.value }))}
+                      />
+                    </label>
+                  </div>
+
+                  <button className="btnSecondary pwToggle" type="button" onClick={() => setShowPw((s) => !s)}>
+                    {showPw ? <EyeOff size={16} /> : <Eye size={16} />}
+                    {showPw ? 'Hide' : 'Show'}
+                  </button>
+                </div>
+
+                {pwMismatch ? <div className="inlineError">Passwords do not match</div> : null}
+                {pwError ? <div className="inlineError">{pwError.message || 'Failed to update password.'}</div> : null}
+                {pw.next.length > 0 && pw.next.length < 8 ? (
+                  <div className="inlineHint">New password should be at least 8 characters</div>
+                ) : null}
+
+                <div className="settingsFooter">
+                  <button
+                    className="btnPrimary"
+                    type="button"
+                    onClick={onUpdatePassword}
+                    disabled={!pwValid || pwSaving}
+                  >
+                    {pwSaving ? 'Updating…' : 'Update Password'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          ) : null}
+
+          {activeTab === 'preferences' ? (
+            <div className="card settingsCard">
+              <div className="cardHeader">
+                <div>
+                  <div className="cardTitle">Preferences</div>
+                  <div className="muted">Notification settings</div>
+                </div>
+              </div>
+              <div className="settingsBody">
+                {prefsError ? (
+                  <div className="inlineError">{prefsError.message || 'Failed to save preferences.'}</div>
+                ) : null}
+                <div className="prefsGrid">
+                  <label className="sToggleRow">
+                    <div>
+                      <div className="sLabel">Email notifications</div>
+                      <div className="sHint">Account alerts and CRM updates</div>
+                    </div>
+                    <input
+                      type="checkbox"
+                      checked={prefs.email_notifications}
+                      onChange={(e) => setPrefs((p) => ({ ...p, email_notifications: e.target.checked }))}
+                    />
+                  </label>
+                  <label className="sToggleRow">
+                    <div>
+                      <div className="sLabel">Task reminders</div>
+                      <div className="sHint">Due date reminders and follow-ups</div>
+                    </div>
+                    <input
+                      type="checkbox"
+                      checked={prefs.task_reminders}
+                      onChange={(e) => setPrefs((p) => ({ ...p, task_reminders: e.target.checked }))}
+                    />
+                  </label>
+                  <label className="sToggleRow">
+                    <div>
+                      <div className="sLabel">Weekly summary emails</div>
+                      <div className="sHint">Pipeline and activity summary every week</div>
+                    </div>
+                    <input
+                      type="checkbox"
+                      checked={prefs.weekly_summary}
+                      onChange={(e) => setPrefs((p) => ({ ...p, weekly_summary: e.target.checked }))}
+                    />
+                  </label>
+                </div>
+                <div className="settingsFooter">
+                  <button
+                    className="btnPrimary"
+                    type="button"
+                    onClick={onSavePrefs}
+                    disabled={!prefsDirty || prefsSaving}
+                  >
+                    <Save size={16} />
+                    {prefsSaving ? 'Saving…' : 'Save Preferences'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          ) : null}
+
+          {activeTab === 'integrations' ? (
+            <div className="card settingsCard">
+              <div className="cardHeader">
+                <div>
+                  <div className="cardTitle">Calendly</div>
+                  <div className="muted">Connect your scheduling account</div>
+                </div>
+              </div>
+              <div className="settingsBody">
+                {calendlyError ? (
+                  <div className="inlineError">{calendlyError.message || 'Calendly integration error.'}</div>
+                ) : null}
+
+                {calendlyLoading ? <div className="inlineHint">Loading Calendly connection…</div> : null}
+
+                <div className="settingsRow">
+                  <div className="settingsRowMain">
+                    <div className="settingsRowTitle">Connection</div>
+                    <div className="settingsRowSub">
+                      {calendlyConn?.calendly_user_uri ? calendlyConn.calendly_user_uri : 'Not connected'}
                     </div>
                   </div>
-                </div>
-              </div>
-
-              <label className="sField">
-                <div className="sLabel">Full Name</div>
-                <input
-                  className="sInput"
-                  value={myProfile.full_name}
-                  onChange={(e) => setMyProfile((p) => ({ ...p, full_name: e.target.value }))}
-                />
-              </label>
-
-              <label className="sField">
-                <div className="sLabel">Email</div>
-                <input className="sInput" value={myProfile.email} readOnly />
-              </label>
-
-              <div className="sField">
-                <div className="sLabel">Role</div>
-                <div className="sReadRow">
-                  <span className={['sBadge', `role-${myProfile.role}`].join(' ')}>
-                    <ShieldCheck size={14} />
-                    {roleLabel(myProfile.role)}
-                  </span>
-                  <span className="muted">Read-only</span>
-                </div>
-              </div>
-
-              {isAdmin ? (
-                <label className="sToggleRow">
-                  <div>
-                    <div className="sLabel">Active status</div>
-                    <div className="sHint">Only admins can change this for themselves</div>
+                  <div className="settingsRowRight">
+                    <span className={['sBadge', calendlyConn ? 'role-advisor' : 'role-manager'].join(' ')}>
+                      {calendlyConn ? 'Connected' : 'Not connected'}
+                    </span>
                   </div>
-                  <input
-                    type="checkbox"
-                    checked={myProfile.is_active}
-                    onChange={(e) => setMyProfile((p) => ({ ...p, is_active: e.target.checked }))}
-                  />
-                </label>
-              ) : null}
-            </div>
+                </div>
 
-            <div className="settingsFooter">
-              <button
-                className="btnPrimary"
-                type="button"
-                onClick={onSaveProfile}
-                disabled={!profileDirty || savingProfile}
-              >
-                <Save size={16} />
-                {savingProfile ? 'Saving…' : 'Save'}
-              </button>
-            </div>
-          </div>
-        </div>
+                {calendlyConn?.webhook_last_error ? (
+                  <div className="inlineHint" style={{ marginTop: 10 }}>
+                    {/calendly account to standard|permission denied|upgrade/i.test(
+                      calendlyConn.webhook_last_error,
+                    )
+                      ? 'Your account is connected. Automatic meeting sync uses Calendly webhooks, which require a paid Calendly plan (Standard or higher). On the free plan, use “Sync now” below to import your meetings on demand.'
+                      : `Connected, but automatic meeting sync may be inactive: ${calendlyConn.webhook_last_error}`}
+                  </div>
+                ) : null}
 
-        {/* Section 2 */}
-        <div className="card settingsCard">
-          <div className="cardHeader">
-            <div className="cardTitle">Password</div>
-            <div className="muted">Update your password</div>
-          </div>
-          <div className="settingsBody">
-            <div className="pwRow">
-              <div className="pwGrid">
-                <label className="sField">
-                  <div className="sLabel">Current password</div>
-                  <input
-                    className="sInput"
-                    type={showPw ? 'text' : 'password'}
-                    value={pw.current}
-                    onChange={(e) => setPw((x) => ({ ...x, current: e.target.value }))}
-                  />
-                </label>
-                <label className="sField">
-                  <div className="sLabel">New password</div>
-                  <input
-                    className="sInput"
-                    type={showPw ? 'text' : 'password'}
-                    value={pw.next}
-                    onChange={(e) => setPw((x) => ({ ...x, next: e.target.value }))}
-                  />
-                </label>
-                <label className="sField">
-                  <div className="sLabel">Confirm password</div>
-                  <input
-                    className="sInput"
-                    type={showPw ? 'text' : 'password'}
-                    value={pw.confirm}
-                    onChange={(e) => setPw((x) => ({ ...x, confirm: e.target.value }))}
-                  />
-                </label>
+                {calendlySyncMsg ? (
+                  <div className="inlineHint" style={{ marginTop: 10 }}>
+                    {calendlySyncMsg}
+                  </div>
+                ) : null}
+
+                <div className="settingsFooter settingsFooterSplit">
+                  {calendlyConn ? (
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      <button
+                        className="btnPrimary"
+                        type="button"
+                        onClick={onSyncCalendly}
+                        disabled={calendlySyncing}
+                      >
+                        {calendlySyncing ? 'Syncing…' : 'Sync now'}
+                      </button>
+                      <button
+                        className="btnSecondary"
+                        type="button"
+                        onClick={onDisconnectCalendly}
+                        disabled={calendlyLoading}
+                      >
+                        Disconnect
+                      </button>
+                    </div>
+                  ) : (
+                    <button className="btnPrimary" type="button" onClick={onConnectCalendly} disabled={calendlyLoading}>
+                      {calendlyLoading ? 'Connecting…' : 'Connect Calendly'}
+                    </button>
+                  )}
+
+                  <div className="muted" style={{ fontSize: 11 }}>
+                    Advisors can only see their own meetings. Admins can see all.
+                  </div>
+                </div>
               </div>
-
-              <button className="btnSecondary pwToggle" type="button" onClick={() => setShowPw((s) => !s)}>
-                {showPw ? <EyeOff size={16} /> : <Eye size={16} />}
-                {showPw ? 'Hide' : 'Show'}
-              </button>
             </div>
+          ) : null}
 
-            {pwMismatch ? <div className="inlineError">Passwords do not match</div> : null}
-            {pwError ? <div className="inlineError">{pwError.message || 'Failed to update password.'}</div> : null}
-            {pw.next.length > 0 && pw.next.length < 8 ? (
-              <div className="inlineHint">New password should be at least 8 characters</div>
-            ) : null}
-
-            <div className="settingsFooter">
-              <button
-                className="btnPrimary"
-                type="button"
-                onClick={onUpdatePassword}
-                disabled={!pwValid || pwSaving}
-              >
-                {pwSaving ? 'Updating…' : 'Update Password'}
-              </button>
-            </div>
-          </div>
-        </div>
-
-        {/* Section 3 */}
-        <div className="card settingsCard">
-          <div className="cardHeader">
-            <div className="cardTitle">Preferences</div>
-            <div className="muted">Notification settings</div>
-          </div>
-          <div className="settingsBody">
-            <div className="prefsGrid">
-              <label className="sToggleRow">
+          {activeTab === 'integrations' ? (
+            <div className="card settingsCard">
+              <div className="cardHeader">
                 <div>
-                  <div className="sLabel">Email notifications</div>
-                  <div className="sHint">Account alerts and CRM updates</div>
+                  <div className="cardTitle">Zoom</div>
+                  <div className="muted">Create Zoom meetings straight from the CRM</div>
                 </div>
-                <input
-                  type="checkbox"
-                  checked={prefs.email_notifications}
-                  onChange={(e) => setPrefs((p) => ({ ...p, email_notifications: e.target.checked }))}
-                />
-              </label>
-              <label className="sToggleRow">
-                <div>
-                  <div className="sLabel">Task reminders</div>
-                  <div className="sHint">Due date reminders and follow-ups</div>
-                </div>
-                <input
-                  type="checkbox"
-                  checked={prefs.task_reminders}
-                  onChange={(e) => setPrefs((p) => ({ ...p, task_reminders: e.target.checked }))}
-                />
-              </label>
-              <label className="sToggleRow">
-                <div>
-                  <div className="sLabel">Weekly summary emails</div>
-                  <div className="sHint">Pipeline and activity summary every week</div>
-                </div>
-                <input
-                  type="checkbox"
-                  checked={prefs.weekly_summary}
-                  onChange={(e) => setPrefs((p) => ({ ...p, weekly_summary: e.target.checked }))}
-                />
-              </label>
-            </div>
-            <div className="settingsFooter">
-              <button className="btnPrimary" type="button" onClick={onSavePrefs} disabled={!prefsDirty}>
-                <Save size={16} />
-                Save Preferences
-              </button>
-            </div>
-          </div>
-        </div>
+              </div>
+              <div className="settingsBody">
+                {zoomError ? (
+                  <div className="inlineError">{zoomError.message || 'Zoom integration error.'}</div>
+                ) : null}
 
-        {/* Section 4 */}
-        {isAdmin ? (
-          <div className="card settingsCard">
-            <div className="cardHeader">
-              <div className="cardTitle">Team Management</div>
-              <div className="muted">Admin-only controls</div>
+                {zoomLoading ? <div className="inlineHint">Loading Zoom connection…</div> : null}
+
+                <div className="settingsRow">
+                  <div className="settingsRowMain">
+                    <div className="settingsRowTitle">Connection</div>
+                    <div className="settingsRowSub">
+                      {zoomConn?.email || zoomConn?.zoom_user_id || 'Not connected'}
+                    </div>
+                  </div>
+                  <div className="settingsRowRight">
+                    <span className={['sBadge', zoomConn ? 'role-advisor' : 'role-manager'].join(' ')}>
+                      {zoomConn ? 'Connected' : 'Not connected'}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="settingsFooter settingsFooterSplit">
+                  {zoomConn ? (
+                    <button
+                      className="btnSecondary"
+                      type="button"
+                      onClick={onDisconnectZoom}
+                      disabled={zoomLoading}
+                    >
+                      Disconnect
+                    </button>
+                  ) : (
+                    <button className="btnPrimary" type="button" onClick={onConnectZoom} disabled={zoomLoading}>
+                      {zoomLoading ? 'Connecting…' : 'Connect Zoom'}
+                    </button>
+                  )}
+
+                  <div className="muted" style={{ fontSize: 11 }}>
+                    Once connected, you can generate a Zoom link when scheduling a meeting.
+                  </div>
+                </div>
+              </div>
             </div>
-            <div className="settingsBody">
-              {teamError ? (
-                <div className="inlineError">{teamError.message || 'Team update failed.'}</div>
-              ) : null}
-              {inviteError ? (
-                <div className="inlineError">{inviteError.message || 'Invite failed.'}</div>
-              ) : null}
-              <div className="adminTop">
+          ) : null}
+
+          {isAdmin ? (
+            <div className="card settingsCard">
+              <div className="cardHeader">
+                <div>
+                  <div className="cardTitle">Team management</div>
+                  <div className="muted">Manage roles, managers, and active status</div>
+                </div>
                 <button className="btnPrimary" type="button" onClick={onAddUser}>
                   <Plus size={16} />
-                  Invite User
+                  Invite user
                 </button>
               </div>
+              <div className="settingsBody">
+                {teamError ? <div className="inlineError">{teamError.message || 'Team update failed.'}</div> : null}
+                {inviteError ? <div className="inlineError">{inviteError.message || 'Invite failed.'}</div> : null}
 
-              <div className="adminTableWrap">
-                <table className="adminTable">
+                <div className="adminTableWrap">
+                  <table className="adminTable">
                   <thead>
                     <tr>
                       <th>Name</th>
@@ -483,31 +902,25 @@ export default function Settings() {
                         <td className="tName">{p.full_name}</td>
                         <td className="tMuted">{p.email}</td>
                         <td>
-                          <select
-                            className="tSelect"
+                          <Select
+                            size="sm"
                             value={p.role}
-                            onChange={(e) => updateTeamRow(p.id, { role: e.target.value })}
-                          >
-                            <option value="admin">admin</option>
-                            <option value="manager">manager</option>
-                            <option value="advisor">advisor</option>
-                          </select>
+                            onChange={(v) => updateTeamRow(p.id, { role: v })}
+                            options={roleOptions}
+                          />
                         </td>
                         <td>
-                          <select
-                            className="tSelect"
+                          <Select
+                            size="sm"
                             value={p.manager_id || ''}
-                            onChange={(e) => updateTeamRow(p.id, { manager_id: e.target.value || null })}
-                          >
-                            <option value="">—</option>
-                            {managers
-                              .filter((m) => m.id !== p.id)
-                              .map((m) => (
-                                <option key={m.id} value={m.id}>
-                                  {m.full_name}
-                                </option>
-                              ))}
-                          </select>
+                            onChange={(v) => updateTeamRow(p.id, { manager_id: v || null })}
+                            options={[
+                              { value: '', label: '—' },
+                              ...managers
+                                .filter((m) => m.id !== p.id)
+                                .map((m) => ({ value: m.id, label: m.full_name })),
+                            ]}
+                          />
                         </td>
                         <td>
                           <label className="inlineToggle">
@@ -540,15 +953,16 @@ export default function Settings() {
                       ))
                     )}
                   </tbody>
-                </table>
-              </div>
+                  </table>
+                </div>
 
-              <div className="adminHint">
-                Invites create a real login via an Edge Function (service role). Profiles are created/updated server-side.
+                <div className="adminHint">
+                  Invites create a real login via an Edge Function (service role). Profiles are created/updated server-side.
+                </div>
               </div>
             </div>
-          </div>
-        ) : null}
+          ) : null}
+        </section>
       </div>
 
       {inviteOpen ? (
@@ -586,32 +1000,24 @@ export default function Settings() {
                 </label>
                 <label className="sField">
                   <div className="sLabel">Role</div>
-                  <select
-                    className="sInput"
+                  <Select
                     value={inviteForm.role}
-                    onChange={(e) => setInviteForm((f) => ({ ...f, role: e.target.value }))}
-                  >
-                    <option value="admin">admin</option>
-                    <option value="manager">manager</option>
-                    <option value="advisor">advisor</option>
-                  </select>
+                    onChange={(v) => setInviteForm((f) => ({ ...f, role: v }))}
+                    options={roleOptions}
+                  />
                 </label>
                 <label className="sField">
                   <div className="sLabel">Manager</div>
-                  <select
-                    className="sInput"
+                  <Select
                     value={inviteForm.manager_id}
-                    onChange={(e) => setInviteForm((f) => ({ ...f, manager_id: e.target.value }))}
-                  >
-                    <option value="">—</option>
-                    {managers
-                      .filter((m) => m.id !== profile?.id)
-                      .map((m) => (
-                        <option key={m.id} value={m.id}>
-                          {m.full_name}
-                        </option>
-                      ))}
-                  </select>
+                    onChange={(v) => setInviteForm((f) => ({ ...f, manager_id: v }))}
+                    options={[
+                      { value: '', label: '—' },
+                      ...managers
+                        .filter((m) => m.id !== profile?.id)
+                        .map((m) => ({ value: m.id, label: m.full_name })),
+                    ]}
+                  />
                 </label>
               </div>
             </div>
