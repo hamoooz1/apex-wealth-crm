@@ -111,7 +111,7 @@ export async function fetchClientsPageData() {
 }
 
 export async function fetchClientDetail(clientId) {
-  const [clientRes, profilesRes, meetingsRes, tasksRes] = await Promise.all([
+  const [clientRes, profilesRes, meetingsRes, tasksRes, recordingsRes, activityRes, notesRes] = await Promise.all([
     supabase.from('clients').select('*').eq('id', clientId).maybeSingle(),
     supabase.from('profiles').select('*'),
     supabase.from('meetings').select('*').eq('client_id', clientId).order('start_time', { ascending: false }),
@@ -120,15 +120,58 @@ export async function fetchClientDetail(clientId) {
       .select('*')
       .eq('client_id', clientId)
       .order('due_date', { ascending: true, nullsFirst: false }),
+    supabase
+      .from('meeting_recordings')
+      .select('*')
+      .eq('client_id', clientId)
+      .order('recording_start', { ascending: false, nullsFirst: false })
+      .order('created_at', { ascending: false }),
+    supabase
+      .from('activity_logs')
+      .select('*')
+      .eq('client_id', clientId)
+      .order('created_at', { ascending: false })
+      .limit(100),
+    supabase
+      .from('client_notes')
+      .select('*')
+      .eq('client_id', clientId)
+      .order('created_at', { ascending: false }),
   ])
-  const err = clientRes.error || profilesRes.error || meetingsRes.error || tasksRes.error
+  const err =
+    clientRes.error ||
+    profilesRes.error ||
+    meetingsRes.error ||
+    tasksRes.error ||
+    recordingsRes.error ||
+    activityRes.error ||
+    notesRes.error
   if (err) throw err
   return {
     client: clientRes.data || null,
     profiles: profilesRes.data || [],
     meetings: meetingsRes.data || [],
     tasks: tasksRes.data || [],
+    recordings: recordingsRes.data || [],
+    activity: activityRes.data || [],
+    notes: notesRes.data || [],
   }
+}
+
+export async function addClientNote({ clientId, authorId, kind, body }) {
+  const { data, error } = await supabase
+    .from('client_notes')
+    .insert({ client_id: clientId, author_id: authorId, kind: kind || 'note', body })
+    .select('*')
+    .maybeSingle()
+  if (error) throw error
+  return data
+}
+
+export async function deleteClientNote(noteId) {
+  const { error } = await supabase.from('client_notes').delete().eq('id', noteId)
+  if (error) throw error
+  return true
 }
 
 export async function fetchProfilesPageData() {

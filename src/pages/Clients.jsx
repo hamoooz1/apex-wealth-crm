@@ -5,7 +5,6 @@ import { fetchClientsPageData } from '../lib/queries.js'
 import { supabase } from '../lib/supabaseClient.js'
 import { useAuth } from '../contexts/AuthContext.jsx'
 import Select from '../components/ui/Select.jsx'
-import ClientRecordingsModal from '../components/clients/ClientRecordingsModal.jsx'
 
 function formatCurrency(n) {
   const v = Number(n || 0)
@@ -40,7 +39,6 @@ export default function Clients() {
   const [createOpen, setCreateOpen] = useState(false)
   const [createDraft, setCreateDraft] = useState(null)
   const [createSaving, setCreateSaving] = useState(false)
-  const [recordingsClient, setRecordingsClient] = useState(null)
 
   useEffect(() => {
     let mounted = true
@@ -382,17 +380,16 @@ export default function Clients() {
                     </div>
                   ) : (
                     <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-                      <button
+                      <Link
                         className="btnSecondary recBtn"
-                        type="button"
-                        onClick={() => setRecordingsClient(c)}
+                        to={`/clients/${c.id}?tab=recordings`}
                         title="View recordings"
                       >
                         <Film size={16} />
                         {computed.recordingCounts[c.id] ? (
                           <span className="recBadge">{computed.recordingCounts[c.id]}</span>
                         ) : null}
-                      </button>
+                      </Link>
                       <button className="btnSecondary" type="button" onClick={() => startEdit(c)}>
                         <Pencil size={16} />
                         Edit
@@ -519,12 +516,6 @@ export default function Clients() {
           </div>
         </div>
       ) : null}
-
-      <ClientRecordingsModal
-        open={Boolean(recordingsClient)}
-        client={recordingsClient}
-        onClose={() => setRecordingsClient(null)}
-      />
     </div>
   )
 }

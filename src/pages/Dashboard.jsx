@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { fetchDashboardData } from '../lib/queries.js'
+import { humanizeAction } from '../lib/activity.js'
 import Avatar from '../components/ui/Avatar.jsx'
 
 import {
@@ -69,46 +70,6 @@ const DAY_MS = 1000 * 60 * 60 * 24
 
 function daysBetween(fromMs, toMs) {
   return Math.round((toMs - fromMs) / DAY_MS)
-}
-
-function humanizeAction(action) {
-  const a = String(action || '')
-  const map = {
-    'lead.created': 'created a lead',
-    'lead.assigned': 'assigned a lead',
-    'lead.status_changed': 'changed lead status',
-    'lead.contact_updated': 'updated lead contact',
-    'lead.deleted': 'deleted a lead',
-
-    'pipeline.created': 'created an opportunity',
-    'pipeline.stage_changed': 'moved an opportunity stage',
-    'pipeline.assigned': 'assigned an opportunity',
-    'pipeline.value_changed': 'updated opportunity value',
-    'pipeline.probability_changed': 'updated opportunity probability',
-    'pipeline.deleted': 'deleted an opportunity',
-
-    'task.created': 'created a task',
-    'task.status_changed': 'changed task status',
-    'task.assigned': 'assigned a task',
-    'task.due_date_changed': 'updated task due date',
-    'task.priority_changed': 'updated task priority',
-    'task.deleted': 'deleted a task',
-
-    'client.created': 'created a client',
-    'client.aum_changed': 'updated client AUM',
-    'client.status_changed': 'changed client status',
-    'client.advisor_changed': 'changed client advisor',
-    'client.next_review_changed': 'updated next review date',
-    'client.contact_updated': 'updated client contact',
-    'client.deleted': 'deleted a client',
-
-    'meeting.created': 'scheduled a meeting',
-    'meeting.status_changed': 'updated meeting status',
-    'meeting.rescheduled': 'rescheduled a meeting',
-    'meeting.advisor_changed': 'reassigned a meeting',
-    'meeting.deleted': 'deleted a meeting',
-  }
-  return map[a] || a.replaceAll('_', ' ')
 }
 
 function formatFromTo(fromVal, toVal, { kind = 'text', fmt } = {}) {

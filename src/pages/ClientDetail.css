@@ -59,6 +59,14 @@
   display: flex;
   align-items: center;
   gap: 18px;
+  flex-wrap: wrap;
+}
+
+.cdActions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 
 .cdAum {
@@ -111,11 +119,201 @@
   margin-top: 16px;
 }
 
+.cdTabs {
+  display: flex;
+  gap: 4px;
+  margin-top: 18px;
+  border-bottom: 1px solid var(--border);
+}
+
+.cdTab {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 10px 14px;
+  border: none;
+  background: none;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--muted);
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+}
+
+.cdTab:hover {
+  color: var(--text);
+}
+
+.cdTab.isActive {
+  color: var(--blue);
+  border-bottom-color: var(--blue);
+}
+
+.cdTabCount {
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 9px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--blue);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.cdTabPanel {
+  margin-top: 16px;
+}
+
 .cdGrid {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
   gap: 16px;
   margin-top: 16px;
+}
+
+.cdTimeline {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.cdTimelineItem {
+  display: flex;
+  gap: 12px;
+  padding: 12px 0;
+  border-top: 1px solid var(--border);
+}
+
+.cdTimelineItem:first-child {
+  border-top: none;
+}
+
+.cdTimelineBody {
+  min-width: 0;
+}
+
+.cdTimelineMain {
+  font-size: 14px;
+}
+
+.cdTimelineActor {
+  font-weight: 650;
+}
+
+.cdTimelineAction {
+  color: var(--text);
+}
+
+.cdTimelineDetail {
+  font-size: 13px;
+  color: var(--muted);
+  margin-top: 2px;
+}
+
+.cdTimelineTime {
+  font-size: 12px;
+  color: var(--muted);
+  margin-top: 3px;
+}
+
+.cdNoteComposer {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-bottom: 16px;
+  margin-bottom: 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.cdNoteComposerTop {
+  display: flex;
+  gap: 10px;
+}
+
+.cdNoteComposerActions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.cdNotes {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.cdNote {
+  display: flex;
+  gap: 12px;
+  padding: 12px 0;
+  border-top: 1px solid var(--border);
+}
+
+.cdNote:first-child {
+  border-top: none;
+}
+
+.cdNoteIcon {
+  width: 30px;
+  height: 30px;
+  flex: none;
+  border-radius: 8px;
+  display: grid;
+  place-items: center;
+  background: var(--border-2, rgba(0, 0, 0, 0.06));
+  color: var(--muted);
+}
+
+.cdNoteBody {
+  min-width: 0;
+  flex: 1;
+}
+
+.cdNoteMeta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.cdNoteKind {
+  font-weight: 700;
+  color: var(--text);
+}
+
+.cdNoteAuthor {
+  font-weight: 600;
+}
+
+.cdNoteDelete {
+  margin-left: auto;
+  border: none;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+  padding: 2px;
+  border-radius: 6px;
+  display: inline-flex;
+}
+
+.cdNoteDelete:hover {
+  color: #dc2626;
+  background: var(--border-2, rgba(0, 0, 0, 0.06));
+}
+
+.cdNoteText {
+  font-size: 14px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  margin-top: 4px;
 }
 
 .cdPanel {

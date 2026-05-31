@@ -1,10 +1,56 @@
-import { useEffect, useMemo, useState } from 'react'
-import { Link, useParams } from 'react-router-dom'
-import { ArrowLeft, Calendar as CalendarIcon, Check, ClipboardList, Pencil, X } from 'lucide-react'
-import { fetchClientDetail } from '../lib/queries.js'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { Link, useParams, useSearchParams } from 'react-router-dom'
+import {
+  ArrowLeft,
+  Calendar as CalendarIcon,
+  Check,
+  ClipboardList,
+  Film,
+  History,
+  LayoutGrid,
+  Mail,
+  MessageSquare,
+  Pencil,
+  Phone,
+  Plus,
+  StickyNote,
+  Trash2,
+  Video,
+  X,
+} from 'lucide-react'
+import { addClientNote, deleteClientNote, fetchClientDetail } from '../lib/queries.js'
+import { humanizeAction, summarizeActivityDetails } from '../lib/activity.js'
 import { supabase } from '../lib/supabaseClient.js'
+import { useAuth } from '../contexts/AuthContext.jsx'
+import Avatar from '../components/ui/Avatar.jsx'
+import RecordingList from '../components/recordings/RecordingList.jsx'
+import MeetingModal from '../components/meetings/MeetingModal.jsx'
 import Select from '../components/ui/Select.jsx'
 import './ClientDetail.css'
+
+const NOTE_KINDS = [
+  { value: 'note', label: 'Note' },
+  { value: 'call', label: 'Call' },
+  { value: 'email', label: 'Email' },
+  { value: 'meeting', label: 'Meeting' },
+]
+
+const taskPriorityOptions = [
+  { value: 'low', label: 'Low' },
+  { value: 'medium', label: 'Medium' },
+  { value: 'high', label: 'High' },
+]
+
+function noteKindLabel(k) {
+  return NOTE_KINDS.find((x) => x.value === k)?.label || 'Note'
+}
+
+function NoteKindIcon({ kind, size = 14 }) {
+  if (kind === 'call') return <Phone size={size} />
+  if (kind === 'email') return <Mail size={size} />
+  if (kind === 'meeting') return <Video size={size} />
+  return <StickyNote size={size} />
+}
 
 function formatCurrency(n) {
   const v = Number(n || 0)
@@ -51,10 +97,32 @@ function taskStatusLabel(s) {
 
 export default function ClientDetail() {
   const { id } = useParams()
+  const { profile: me } = useAuth()
+  const isAdmin = me?.role === 'admin'
+  const [searchParams] = useSearchParams()
+  const initialTab = ['overview', 'recordings', 'activity', 'notes'].includes(searchParams.get('tab'))
+    ? searchParams.get('tab')
+    : 'overview'
   const [state, setState] = useState({ loading: true, error: null, data: null })
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(null)
   const [saving, setSaving] = useState(false)
+  const [tab, setTab] = useState(initialTab)
+
+  const [noteKind, setNoteKind] = useState('note')
+  const [noteBody, setNoteBody] = useState('')
+  const [noteSaving, setNoteSaving] = useState(false)
+
+  const [meetingOpen, setMeetingOpen] = useState(false)
+  const [taskOpen, setTaskOpen] = useState(false)
+  const [taskDraft, setTaskDraft] = useState(null)
+  const [taskSaving, setTaskSaving] = useState(false)
+
+  const reload = useCallback(async () => {
+    const data = await fetchClientDetail(id)
+    setState({ loading: false, error: null, data })
+    return data
+  }, [id])
 
   useEffect(() => {
     let mounted = true
@@ -80,7 +148,12 @@ export default function ClientDetail() {
     const profiles = state.data?.profiles || []
     const meetings = state.data?.meetings || []
     const tasks = state.data?.tasks || []
+    const recordings = state.data?.recordings || []
+    const activity = state.data?.activity || []
+    const notes = state.data?.notes || []
     const profilesMap = new Map(profiles.map((p) => [p.id, p]))
+    const profile = (pid) => profilesMap.get(pid) || null
+    const profileName = (pid) => profilesMap.get(pid)?.full_name || 'Someone'
     const advisorName = client?.advisor_id ? profilesMap.get(client.advisor_id)?.full_name || 'Unknown' : '—'
     const advisorOptions = [
       { value: '', label: '—' },
@@ -99,7 +172,20 @@ export default function ClientDetail() {
       .filter((m) => !(m.start_time && new Date(m.start_time).getTime() >= now && m.status !== 'canceled'))
       .sort((a, b) => new Date(b.start_time) - new Date(a.start_time))
     const openTasks = tasks.filter((t) => t.status !== 'done')
-    return { client, advisorName, advisorOptions, statusOptions, upcoming, past, openTasks }
+    return {
+      client,
+      advisorName,
+      advisorOptions,
+      statusOptions,
+      upcoming,
+      past,
+      openTasks,
+      recordings,
+      activity,
+      notes,
+      profile,
+      profileName,
+    }
   }, [state.data])
 
   function startEdit() {
@@ -146,6 +232,69 @@ export default function ClientDetail() {
       setState((s) => ({ ...s, error: e }))
     } finally {
       setSaving(false)
+    }
+  }
+
+  async function onAddNote() {
+    const body = noteBody.trim()
+    if (!body || !me?.id) return
+    setNoteSaving(true)
+    setState((s) => ({ ...s, error: null }))
+    try {
+      await addClientNote({ clientId: id, authorId: me.id, kind: noteKind, body })
+      setNoteBody('')
+      setNoteKind('note')
+      await reload()
+    } catch (e) {
+      setState((s) => ({ ...s, error: e }))
+    } finally {
+      setNoteSaving(false)
+    }
+  }
+
+  async function onDeleteNote(noteId) {
+    if (!window.confirm('Delete this note?')) return
+    setState((s) => ({ ...s, error: null }))
+    try {
+      await deleteClientNote(noteId)
+      await reload()
+    } catch (e) {
+      setState((s) => ({ ...s, error: e }))
+    }
+  }
+
+  function openNewTask() {
+    setTaskDraft({
+      title: '',
+      due_date: '',
+      priority: 'medium',
+      assigned_to: computed.client?.advisor_id || me?.id || '',
+    })
+    setTaskOpen(true)
+  }
+
+  async function onCreateTask() {
+    if (!taskDraft?.title?.trim()) return
+    setTaskSaving(true)
+    setState((s) => ({ ...s, error: null }))
+    try {
+      const { error } = await supabase.from('tasks').insert({
+        title: taskDraft.title.trim(),
+        status: 'todo',
+        priority: taskDraft.priority || 'medium',
+        due_date: taskDraft.due_date || null,
+        assigned_to: taskDraft.assigned_to || null,
+        client_id: id,
+        created_at: new Date().toISOString(),
+      })
+      if (error) throw error
+      setTaskOpen(false)
+      setTaskDraft(null)
+      await reload()
+    } catch (e) {
+      setState((s) => ({ ...s, error: e }))
+    } finally {
+      setTaskSaving(false)
     }
   }
 
@@ -208,11 +357,19 @@ export default function ClientDetail() {
             <div className="cdAumLabel">AUM</div>
             <div className="cdAumValue">{formatCurrency(c.aum)}</div>
           </div>
-          {!editing ? (
-            <button className="btnSecondary" type="button" onClick={startEdit}>
-              <Pencil size={16} /> Edit
+          <div className="cdActions">
+            <button className="btnSecondary" type="button" onClick={() => setMeetingOpen(true)}>
+              <Video size={16} /> New meeting
             </button>
-          ) : null}
+            <button className="btnSecondary" type="button" onClick={openNewTask}>
+              <Plus size={16} /> New task
+            </button>
+            {!editing ? (
+              <button className="btnSecondary" type="button" onClick={startEdit}>
+                <Pencil size={16} /> Edit
+              </button>
+            ) : null}
+          </div>
         </div>
       </div>
 
@@ -278,6 +435,44 @@ export default function ClientDetail() {
         </div>
       )}
 
+      <div className="cdTabs" role="tablist">
+        <button
+          type="button"
+          role="tab"
+          className={['cdTab', tab === 'overview' ? 'isActive' : ''].join(' ')}
+          onClick={() => setTab('overview')}
+        >
+          <LayoutGrid size={15} /> Overview
+        </button>
+        <button
+          type="button"
+          role="tab"
+          className={['cdTab', tab === 'recordings' ? 'isActive' : ''].join(' ')}
+          onClick={() => setTab('recordings')}
+        >
+          <Film size={15} /> Recordings
+          {computed.recordings.length ? <span className="cdTabCount">{computed.recordings.length}</span> : null}
+        </button>
+        <button
+          type="button"
+          role="tab"
+          className={['cdTab', tab === 'notes' ? 'isActive' : ''].join(' ')}
+          onClick={() => setTab('notes')}
+        >
+          <MessageSquare size={15} /> Notes
+          {computed.notes.length ? <span className="cdTabCount">{computed.notes.length}</span> : null}
+        </button>
+        <button
+          type="button"
+          role="tab"
+          className={['cdTab', tab === 'activity' ? 'isActive' : ''].join(' ')}
+          onClick={() => setTab('activity')}
+        >
+          <History size={15} /> Activity
+        </button>
+      </div>
+
+      {tab === 'overview' ? (
       <div className="cdGrid">
         <div className="card cdPanel">
           <div className="cdPanelHead">
@@ -345,6 +540,205 @@ export default function ClientDetail() {
           )}
         </div>
       </div>
+      ) : null}
+
+      {tab === 'recordings' ? (
+        <div className="card cdPanel cdTabPanel">
+          <div className="cdPanelHead">
+            <Film size={16} />
+            <span>Recordings &amp; transcripts</span>
+            <span className="cdCount">{computed.recordings.length}</span>
+          </div>
+          {computed.recordings.length === 0 ? (
+            <div className="muted cdEmpty">
+              No recordings yet. They appear automatically once a recorded Zoom meeting with this client finishes processing.
+            </div>
+          ) : (
+            <RecordingList recordings={computed.recordings} showDate />
+          )}
+        </div>
+      ) : null}
+
+      {tab === 'notes' ? (
+        <div className="card cdPanel cdTabPanel">
+          <div className="cdNoteComposer">
+            <div className="cdNoteComposerTop">
+              <Select value={noteKind} onChange={setNoteKind} options={NOTE_KINDS} size="sm" />
+            </div>
+            <textarea
+              className="sInput"
+              rows={3}
+              value={noteBody}
+              onChange={(e) => setNoteBody(e.target.value)}
+              placeholder="Log a call, email, or note about this client…"
+            />
+            <div className="cdNoteComposerActions">
+              <button
+                className="btnPrimary"
+                type="button"
+                onClick={onAddNote}
+                disabled={!noteBody.trim() || noteSaving}
+              >
+                <Plus size={16} /> {noteSaving ? 'Saving…' : 'Add note'}
+              </button>
+            </div>
+          </div>
+
+          {computed.notes.length === 0 ? (
+            <div className="muted cdEmpty">No notes yet. Log your first interaction above.</div>
+          ) : (
+            <ul className="cdNotes">
+              {computed.notes.map((n) => (
+                <li key={n.id} className="cdNote">
+                  <div className="cdNoteIcon">
+                    <NoteKindIcon kind={n.kind} />
+                  </div>
+                  <div className="cdNoteBody">
+                    <div className="cdNoteMeta">
+                      <span className="cdNoteKind">{noteKindLabel(n.kind)}</span>
+                      <span className="cdNoteAuthor">{computed.profileName(n.author_id)}</span>
+                      <span className="cdNoteTime">{formatDateTime(n.created_at)}</span>
+                      {n.author_id === me?.id || isAdmin ? (
+                        <button
+                          className="cdNoteDelete"
+                          type="button"
+                          onClick={() => onDeleteNote(n.id)}
+                          aria-label="Delete note"
+                          title="Delete note"
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      ) : null}
+                    </div>
+                    <div className="cdNoteText">{n.body}</div>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      ) : null}
+
+      {tab === 'activity' ? (
+        <div className="card cdPanel cdTabPanel">
+          <div className="cdPanelHead">
+            <History size={16} />
+            <span>Activity timeline</span>
+            <span className="cdCount">{computed.activity.length}</span>
+          </div>
+          {computed.activity.length === 0 ? (
+            <div className="muted cdEmpty">No activity recorded for this client yet.</div>
+          ) : (
+            <ul className="cdTimeline">
+              {computed.activity.map((a) => {
+                const detail = summarizeActivityDetails(a.action, a.details)
+                return (
+                  <li key={a.id} className="cdTimelineItem">
+                    <Avatar
+                      name={computed.profileName(a.actor_id)}
+                      src={computed.profile(a.actor_id)?.avatar_url || ''}
+                      size="sm"
+                    />
+                    <div className="cdTimelineBody">
+                      <div className="cdTimelineMain">
+                        <span className="cdTimelineActor">{computed.profileName(a.actor_id)}</span>{' '}
+                        <span className="cdTimelineAction">{humanizeAction(a.action)}</span>
+                      </div>
+                      {detail ? <div className="cdTimelineDetail">{detail}</div> : null}
+                      <div className="cdTimelineTime">{formatDateTime(a.created_at)}</div>
+                    </div>
+                  </li>
+                )
+              })}
+            </ul>
+          )}
+        </div>
+      ) : null}
+
+      {meetingOpen ? (
+        <MeetingModal
+          open={meetingOpen}
+          onClose={() => setMeetingOpen(false)}
+          meeting={{ client_id: id, advisor_id: c.advisor_id || me?.id || null }}
+          me={me}
+          isAdmin={isAdmin}
+          profiles={state.data?.profiles || []}
+          leads={[]}
+          clients={[{ id: c.id, full_name: fullName, email: c.email }]}
+          onSaved={async () => {
+            setMeetingOpen(false)
+            await reload()
+          }}
+        />
+      ) : null}
+
+      {taskOpen && taskDraft ? (
+        <div className="modalOverlay" role="dialog" aria-modal="true">
+          <div className="modalCard">
+            <div className="modalHeader">
+              <div>
+                <div className="modalTitle">New task</div>
+                <div className="modalSub">For {fullName}</div>
+              </div>
+              <button className="iconBtn" type="button" onClick={() => setTaskOpen(false)} aria-label="Close">
+                <X size={16} />
+              </button>
+            </div>
+            <div className="modalBody">
+              <div className="formGrid">
+                <label className="sField" style={{ gridColumn: '1 / -1' }}>
+                  <div className="sLabel">Title</div>
+                  <input
+                    className="sInput"
+                    value={taskDraft.title}
+                    onChange={(e) => setTaskDraft((d) => ({ ...d, title: e.target.value }))}
+                    placeholder="Follow up, prep review, send documents…"
+                  />
+                </label>
+                <label className="sField">
+                  <div className="sLabel">Due date</div>
+                  <input
+                    className="sInput"
+                    type="date"
+                    value={taskDraft.due_date}
+                    onChange={(e) => setTaskDraft((d) => ({ ...d, due_date: e.target.value }))}
+                  />
+                </label>
+                <label className="sField">
+                  <div className="sLabel">Priority</div>
+                  <Select
+                    value={taskDraft.priority}
+                    onChange={(v) => setTaskDraft((d) => ({ ...d, priority: v }))}
+                    options={taskPriorityOptions}
+                  />
+                </label>
+                <label className="sField">
+                  <div className="sLabel">Assign to</div>
+                  <Select
+                    value={taskDraft.assigned_to || ''}
+                    onChange={(v) => setTaskDraft((d) => ({ ...d, assigned_to: v }))}
+                    options={computed.advisorOptions}
+                    placeholder="—"
+                  />
+                </label>
+              </div>
+            </div>
+            <div className="modalFooter">
+              <button className="btnSecondary" type="button" onClick={() => setTaskOpen(false)} disabled={taskSaving}>
+                Cancel
+              </button>
+              <button
+                className="btnPrimary"
+                type="button"
+                onClick={onCreateTask}
+                disabled={!taskDraft.title.trim() || taskSaving}
+              >
+                <Check size={16} /> {taskSaving ? 'Creating…' : 'Create task'}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   )
 }
