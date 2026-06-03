@@ -5,7 +5,9 @@ import {
   Calendar as CalendarIcon,
   Check,
   ClipboardList,
+  FileText,
   Film,
+  FolderOpen,
   History,
   LayoutGrid,
   Mail,
@@ -15,10 +17,18 @@ import {
   Plus,
   StickyNote,
   Trash2,
+  Upload,
   Video,
   X,
 } from 'lucide-react'
 import { addClientNote, deleteClientNote, fetchClientDetail } from '../lib/queries.js'
+import {
+  deleteClientDocument,
+  formatFileSize,
+  getDocumentDownloadUrl,
+  uploadClientDocument,
+} from '../lib/documents.js'
+import DocumentPreviewModal from '../components/documents/DocumentPreviewModal.jsx'
 import { humanizeAction, summarizeActivityDetails } from '../lib/activity.js'
 import { supabase } from '../lib/supabaseClient.js'
 import { useAuth } from '../contexts/AuthContext.jsx'
@@ -100,7 +110,9 @@ export default function ClientDetail() {
   const { profile: me } = useAuth()
   const isAdmin = me?.role === 'admin'
   const [searchParams] = useSearchParams()
-  const initialTab = ['overview', 'recordings', 'activity', 'notes'].includes(searchParams.get('tab'))
+  const initialTab = ['overview', 'recordings', 'activity', 'notes', 'documents'].includes(
+    searchParams.get('tab'),
+  )
     ? searchParams.get('tab')
     : 'overview'
   const [state, setState] = useState({ loading: true, error: null, data: null })
@@ -117,6 +129,10 @@ export default function ClientDetail() {
   const [taskOpen, setTaskOpen] = useState(false)
   const [taskDraft, setTaskDraft] = useState(null)
   const [taskSaving, setTaskSaving] = useState(false)
+
+  const [docUploading, setDocUploading] = useState(false)
+  const [docError, setDocError] = useState(null)
+  const [previewDoc, setPreviewDoc] = useState(null)
 
   const reload = useCallback(async () => {
     const data = await fetchClientDetail(id)
@@ -151,6 +167,7 @@ export default function ClientDetail() {
     const recordings = state.data?.recordings || []
     const activity = state.data?.activity || []
     const notes = state.data?.notes || []
+    const documents = state.data?.documents || []
     const profilesMap = new Map(profiles.map((p) => [p.id, p]))
     const profile = (pid) => profilesMap.get(pid) || null
     const profileName = (pid) => profilesMap.get(pid)?.full_name || 'Someone'
@@ -183,6 +200,7 @@ export default function ClientDetail() {
       recordings,
       activity,
       notes,
+      documents,
       profile,
       profileName,
     }
@@ -295,6 +313,44 @@ export default function ClientDetail() {
       setState((s) => ({ ...s, error: e }))
     } finally {
       setTaskSaving(false)
+    }
+  }
+
+  async function onUploadDocument(e) {
+    const file = e.target.files?.[0]
+    e.target.value = ''
+    if (!file || !me?.id) return
+    setDocError(null)
+    setDocUploading(true)
+    try {
+      await uploadClientDocument({ clientId: id, userId: me.id, file })
+      await reload()
+    } catch (err) {
+      setDocError(err)
+    } finally {
+      setDocUploading(false)
+    }
+  }
+
+  async function onDownloadDocument(doc) {
+    setDocError(null)
+    try {
+      const url = await getDocumentDownloadUrl(doc.storage_path)
+      if (!url) throw new Error('Could not generate download link.')
+      window.open(url, '_blank', 'noopener,noreferrer')
+    } catch (err) {
+      setDocError(err)
+    }
+  }
+
+  async function onDeleteDocument(doc) {
+    if (!window.confirm(`Delete "${doc.file_name}"?`)) return
+    setDocError(null)
+    try {
+      await deleteClientDocument(doc)
+      await reload()
+    } catch (err) {
+      setDocError(err)
     }
   }
 
@@ -465,6 +521,17 @@ export default function ClientDetail() {
         <button
           type="button"
           role="tab"
+          className={['cdTab', tab === 'documents' ? 'isActive' : ''].join(' ')}
+          onClick={() => setTab('documents')}
+        >
+          <FolderOpen size={15} /> Documents
+          {computed.documents.length ? (
+            <span className="cdTabCount">{computed.documents.length}</span>
+          ) : null}
+        </button>
+        <button
+          type="button"
+          role="tab"
           className={['cdTab', tab === 'activity' ? 'isActive' : ''].join(' ')}
           onClick={() => setTab('activity')}
         >
@@ -619,6 +686,71 @@ export default function ClientDetail() {
         </div>
       ) : null}
 
+      {tab === 'documents' ? (
+        <div className="card cdPanel cdTabPanel">
+          <div className="cdPanelHead">
+            <FolderOpen size={16} />
+            <span>Compliance vault</span>
+            <span className="cdCount">{computed.documents.length}</span>
+          </div>
+
+          <div className="cdDocUpload">
+            <label className="btnSecondary cdDocUploadBtn">
+              <Upload size={16} />
+              {docUploading ? 'Uploading…' : 'Upload document'}
+              <input
+                type="file"
+                hidden
+                disabled={docUploading}
+                onChange={onUploadDocument}
+                accept=".pdf,.doc,.docx,.xls,.xlsx,.png,.jpg,.jpeg,.txt,.csv"
+              />
+            </label>
+            <div className="sHint">Statements, agreements, KYC forms — up to 50 MB.</div>
+          </div>
+
+          {docError ? (
+            <div className="inlineError">{docError.message || 'Document error.'}</div>
+          ) : null}
+
+          {computed.documents.length === 0 ? (
+            <div className="muted cdEmpty">No documents uploaded yet.</div>
+          ) : (
+            <ul className="cdDocList">
+              {computed.documents.map((doc) => (
+                <li key={doc.id} className="cdDocItem">
+                  <span className="cdDocIcon">
+                    <FileText size={16} />
+                  </span>
+                  <button
+                    type="button"
+                    className="cdDocBody cdDocOpen"
+                    onClick={() => setPreviewDoc(doc)}
+                    title="Preview document"
+                  >
+                    <div className="cdDocName">{doc.file_name}</div>
+                    <div className="cdDocMeta">
+                      {formatFileSize(doc.file_size)} · {computed.profileName(doc.uploaded_by)} ·{' '}
+                      {formatDateTime(doc.created_at)}
+                    </div>
+                  </button>
+                  <div className="cdDocActions">
+                    <button className="btnSecondary" type="button" onClick={() => onDownloadDocument(doc)}>
+                      Download
+                    </button>
+                    {doc.uploaded_by === me?.id || isAdmin ? (
+                      <button className="btnSecondary" type="button" onClick={() => onDeleteDocument(doc)}>
+                        <Trash2 size={14} />
+                      </button>
+                    ) : null}
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      ) : null}
+
       {tab === 'activity' ? (
         <div className="card cdPanel cdTabPanel">
           <div className="cdPanelHead">
@@ -739,6 +871,12 @@ export default function ClientDetail() {
           </div>
         </div>
       ) : null}
+
+      <DocumentPreviewModal
+        doc={previewDoc}
+        open={Boolean(previewDoc)}
+        onClose={() => setPreviewDoc(null)}
+      />
     </div>
   )
 }

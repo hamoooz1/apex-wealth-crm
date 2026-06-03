@@ -11,8 +11,10 @@ import {
 } from '../lib/queries.js'
 import { getMyZoomConnection, startZoomConnect, disconnectZoom } from '../lib/zoom.js'
 import { syncCalendly } from '../lib/calendly.js'
+import { dispatchMyReminders } from '../lib/notifications.js'
 import { supabase } from '../lib/supabaseClient.js'
 import { inviteUser } from '../lib/invite.js'
+import { adminSendPasswordReset } from '../lib/auth.js'
 import Avatar from '../components/ui/Avatar.jsx'
 import Select from '../components/ui/Select.jsx'
 
@@ -99,6 +101,8 @@ export default function Settings() {
   const [savedPrefs, setSavedPrefs] = useState(prefs)
   const [prefsSaving, setPrefsSaving] = useState(false)
   const [prefsError, setPrefsError] = useState(null)
+  const [remindersBusy, setRemindersBusy] = useState(false)
+  const [remindersMsg, setRemindersMsg] = useState('')
   const prefsDirty = useMemo(() => {
     return (
       prefs.email_notifications !== savedPrefs.email_notifications ||
@@ -293,6 +297,8 @@ export default function Settings() {
   const [inviteOpen, setInviteOpen] = useState(false)
   const [inviteLoading, setInviteLoading] = useState(false)
   const [inviteError, setInviteError] = useState(null)
+  const [inviteSuccess, setInviteSuccess] = useState(null)
+  const [resetSendingId, setResetSendingId] = useState(null)
   const [inviteForm, setInviteForm] = useState({
     email: '',
     full_name: '',
@@ -408,6 +414,20 @@ export default function Settings() {
     }
   }
 
+  async function onRefreshReminders() {
+    setRemindersMsg('')
+    setRemindersBusy(true)
+    try {
+      const data = await dispatchMyReminders()
+      const created = data?.results?.[0]?.created ?? 0
+      setRemindersMsg(`Reminders refreshed (${created} notification${created === 1 ? '' : 's'} upserted).`)
+    } catch (e) {
+      setRemindersMsg(e.message || 'Failed to refresh reminders.')
+    } finally {
+      setRemindersBusy(false)
+    }
+  }
+
   useEffect(() => {
     if (!isAdmin) return
     let mounted = true
@@ -431,7 +451,23 @@ export default function Settings() {
     }
   }, [isAdmin])
 
+  async function onSendPasswordReset(member) {
+    setInviteError(null)
+    setInviteSuccess(null)
+    setResetSendingId(member.id)
+    try {
+      await adminSendPasswordReset(member.email)
+      setInviteSuccess(`Password reset email sent to ${member.email}.`)
+    } catch (e) {
+      setInviteError(e)
+    } finally {
+      setResetSendingId(null)
+    }
+  }
+
   async function onAddUser() {
+    setInviteError(null)
+    setInviteSuccess(null)
     setInviteOpen(true)
   }
 
@@ -714,7 +750,16 @@ export default function Settings() {
                     />
                   </label>
                 </div>
-                <div className="settingsFooter">
+                {remindersMsg ? <div className="inlineHint">{remindersMsg}</div> : null}
+                <div className="settingsFooter" style={{ justifyContent: 'space-between', flexWrap: 'wrap', gap: 10 }}>
+                  <button
+                    className="btnSecondary"
+                    type="button"
+                    onClick={onRefreshReminders}
+                    disabled={remindersBusy}
+                  >
+                    {remindersBusy ? 'Refreshing…' : 'Refresh reminders now'}
+                  </button>
                   <button
                     className="btnPrimary"
                     type="button"
@@ -876,6 +921,7 @@ export default function Settings() {
               <div className="settingsBody">
                 {teamError ? <div className="inlineError">{teamError.message || 'Team update failed.'}</div> : null}
                 {inviteError ? <div className="inlineError">{inviteError.message || 'Invite failed.'}</div> : null}
+                {inviteSuccess ? <div className="inlineSuccess">{inviteSuccess}</div> : null}
 
                 <div className="adminTableWrap">
                   <table className="adminTable">
@@ -936,8 +982,13 @@ export default function Settings() {
                         </td>
                         <td>
                           <div className="rowActions">
-                            <button className="btnSecondary" type="button">
-                              Edit
+                            <button
+                              className="btnSecondary"
+                              type="button"
+                              onClick={() => onSendPasswordReset(p)}
+                              disabled={!p.email || resetSendingId === p.id}
+                            >
+                              {resetSendingId === p.id ? 'Sending…' : 'Send reset'}
                             </button>
                             <button
                               className="btnSecondary"
@@ -957,7 +1008,7 @@ export default function Settings() {
                 </div>
 
                 <div className="adminHint">
-                  Invites create a real login via an Edge Function (service role). Profiles are created/updated server-side.
+                  Invites create a real login via an Edge Function. Use <strong>Send reset</strong> if someone cannot sign in or missed their invite email.
                 </div>
               </div>
             </div>
@@ -979,6 +1030,9 @@ export default function Settings() {
             </div>
 
             <div className="modalBody">
+              <div className="inlineHint" style={{ marginBottom: 12 }}>
+                Invited users must click the email link and set a password before they can sign in here.
+              </div>
               <div className="formGrid">
                 <label className="sField">
                   <div className="sLabel">Email</div>
@@ -1032,10 +1086,12 @@ export default function Settings() {
                 disabled={inviteLoading || !inviteForm.email}
                 onClick={async () => {
                   setInviteError(null)
+                  setInviteSuccess(null)
                   setInviteLoading(true)
                   try {
-                    await inviteUser({
-                      email: inviteForm.email.trim(),
+                    const invitedEmail = inviteForm.email.trim()
+                    const result = await inviteUser({
+                      email: invitedEmail,
                       full_name: inviteForm.full_name.trim(),
                       role: inviteForm.role,
                       manager_id: inviteForm.manager_id || null,
@@ -1044,6 +1100,12 @@ export default function Settings() {
                     setTeam(rows)
                     setInviteForm({ email: '', full_name: '', role: 'advisor', manager_id: '' })
                     setInviteOpen(false)
+                    setInviteSuccess(
+                      result?.existing
+                        ? result.message ||
+                            `${invitedEmail} is already on the team. Profile updated — they should sign in or use Forgot password if needed.`
+                        : `Invite sent to ${invitedEmail}. They must open the email and set a password before signing in.`,
+                    )
                   } catch (e) {
                     setInviteError(e)
                   } finally {

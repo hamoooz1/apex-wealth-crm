@@ -9,6 +9,7 @@ import {
   ListTodo,
   CalendarDays,
   LogOut,
+  BarChart3,
 } from 'lucide-react'
 
 import { useAuth } from '../../contexts/AuthContext.jsx'
@@ -18,7 +19,10 @@ import Avatar from '../ui/Avatar.jsx'
 const navSections = [
   {
     label: 'Overview',
-    items: [{ to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard }],
+    items: [
+      { to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
+      { to: '/reports', label: 'Reports', icon: BarChart3 },
+    ],
   },
   {
     label: 'CRM',

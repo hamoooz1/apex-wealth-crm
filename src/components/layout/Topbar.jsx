@@ -1,5 +1,7 @@
-import { Bell, Menu, RefreshCw, X } from 'lucide-react'
+import { Menu, RefreshCw, X } from 'lucide-react'
 import { useMemo, useState } from 'react'
+import GlobalSearch from './GlobalSearch.jsx'
+import NotificationBell from './NotificationBell.jsx'
 
 function formatLastSync(iso) {
   const dt = new Date(iso)
@@ -26,13 +28,7 @@ export default function Topbar({ onOpenSidebar, onCloseSidebar, sidebarOpen }) {
         >
           {sidebarOpen ? <X size={18} /> : <Menu size={18} />}
         </button>
-        <div className="searchWrap">
-          <input
-            className="searchInput"
-            placeholder="Search clients, emails, phone…"
-            type="text"
-          />
-        </div>
+        <GlobalSearch />
       </div>
 
       <div className="topbarRight">
@@ -44,9 +40,7 @@ export default function Topbar({ onOpenSidebar, onCloseSidebar, sidebarOpen }) {
           <RefreshCw size={16} />
           Sync
         </button>
-        <button className="iconBtn" type="button" aria-label="Notifications">
-          <Bell size={16} />
-        </button>
+        <NotificationBell />
         <div className="lastSync">
           <div className="lastSyncLabel">Last sync</div>
           <div className="lastSyncValue">{lastSyncLabel}</div>

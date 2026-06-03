@@ -12,13 +12,15 @@ import ClientDetail from './pages/ClientDetail.jsx'
 import Leads from './pages/Leads.jsx'
 import Team from './pages/Team.jsx'
 import Settings from './pages/Settings.jsx'
+import Reports from './pages/Reports.jsx'
 import Calendar from './pages/Calendar.jsx'
 import Auth from './pages/Auth.jsx'
+import ResetPassword from './pages/ResetPassword.jsx'
 import { AuthProvider, useAuth } from './contexts/AuthContext.jsx'
 import { useEffect, useState } from 'react'
 
 function AuthGate({ children }) {
-  const { loading, session } = useAuth()
+  const { loading, session, passwordRecovery } = useAuth()
   const [transitioning, setTransitioning] = useState(false)
 
   useEffect(() => {
@@ -43,6 +45,7 @@ function AuthGate({ children }) {
     )
   }
   if (!session) return <Auth />
+  if (passwordRecovery) return <ResetPassword />
   return (
     <>
       {transitioning ? <div className="loginTransition" aria-hidden="true" /> : null}
@@ -70,6 +73,7 @@ function App() {
                 <Routes>
                   <Route path="/" element={<Navigate to="/dashboard" replace />} />
                   <Route path="/dashboard" element={<Dashboard />} />
+                  <Route path="/reports" element={<Reports />} />
                   <Route path="/leads" element={<Leads />} />
                   <Route path="/tasks" element={<Tasks />} />
                   <Route path="/pipeline" element={<Pipeline />} />

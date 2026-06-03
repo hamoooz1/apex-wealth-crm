@@ -19,6 +19,7 @@ export function AuthProvider({ children }) {
   const [session, setSession] = useState(null)
   const [user, setUser] = useState(null)
   const [profile, setProfile] = useState(null)
+  const [passwordRecovery, setPasswordRecovery] = useState(false)
   const [loading, setLoading] = useState(true)
   const [profileLoading, setProfileLoading] = useState(false)
   const [profileError, setProfileError] = useState(null)
@@ -42,9 +43,14 @@ export function AuthProvider({ children }) {
 
     init()
 
-    const { data: sub } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+    const { data: sub } = supabase.auth.onAuthStateChange((event, nextSession) => {
       setSession(nextSession)
       setUser(nextSession?.user ?? null)
+      if (event === 'PASSWORD_RECOVERY') {
+        setPasswordRecovery(true)
+      } else if (event === 'SIGNED_OUT') {
+        setPasswordRecovery(false)
+      }
     })
 
     return () => {
@@ -91,6 +97,8 @@ export function AuthProvider({ children }) {
       loading,
       profileLoading,
       profileError,
+      passwordRecovery,
+      clearPasswordRecovery: () => setPasswordRecovery(false),
       signOut: () => supabase.auth.signOut(),
       refreshProfile: async () => {
         if (!user?.id) return null
@@ -99,7 +107,7 @@ export function AuthProvider({ children }) {
         return p
       },
     }
-  }, [session, user, profile, loading, profileLoading, profileError])
+  }, [session, user, profile, loading, profileLoading, profileError, passwordRecovery])
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
 }
