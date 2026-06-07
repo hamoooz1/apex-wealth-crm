@@ -899,8 +899,51 @@ export default function Settings() {
                   )}
 
                   <div className="muted" style={{ fontSize: 11 }}>
-                    Once connected, you can generate a Zoom link when scheduling a meeting.
+                    Once connected, generate a Zoom link when scheduling a meeting. Cloud recording starts automatically on Zoom Plus accounts.
                   </div>
+                </div>
+
+                <div className="zoomDeployChecklist">
+                  <div className="settingsRowTitle" style={{ marginBottom: 8 }}>
+                    Development → Production (let every advisor connect their own Zoom)
+                  </div>
+                  <ol className="zoomDeployList">
+                    <li>
+                      Zoom Marketplace → <strong>Apex Wealth Zoom</strong> → open the <strong>Production</strong> tab (not Development).
+                      Complete app info, privacy policy URL, and scopes — mirror everything from Development.
+                    </li>
+                    <li>
+                      Under Production → <strong>Access</strong>, set OAuth redirect URL to{' '}
+                      <code>https://aambpahxxymxxgqijude.supabase.co/functions/v1/zoom-oauth-callback</code>
+                    </li>
+                    <li>
+                      Copy the <strong>Production Client ID</strong> and <strong>Production Client Secret</strong> (they are
+                      different from Development). Update Supabase Edge Function secrets:{' '}
+                      <code>ZOOM_CLIENT_ID</code> and <code>ZOOM_CLIENT_SECRET</code>.
+                    </li>
+                    <li>
+                      In Production → <strong>Event subscriptions</strong>, re-create the webhook (same URL + secret as
+                      Development). Update Supabase secret <code>ZOOM_WEBHOOK_SECRET_TOKEN</code> if the Production secret
+                      differs.
+                    </li>
+                    <li>
+                      Submit the app for <strong>Zoom review</strong>. After approval, any Zoom user can authorize — no test-user list needed.
+                    </li>
+                    <li>
+                      After swapping keys, every user must <strong>Disconnect</strong> then <strong>Connect Zoom</strong> again in Settings
+                      (old Development tokens stop working).
+                    </li>
+                    <li>
+                      <strong>Scopes:</strong> <code>user:read:user</code>, <code>meeting:write:meeting</code>,{' '}
+                      <code>meeting:read:meeting</code>, <code>cloud_recording:read:list_recording_files</code>
+                    </li>
+                    <li>
+                      Webhook events: Start/End meeting, Recording completed, Summary completed, Transcript completed, AIC transcript completed.
+                    </li>
+                    <li>
+                      Each Zoom Plus host: enable <strong>Cloud recording</strong> + <strong>AI Companion meeting summary</strong> in Zoom account settings.
+                    </li>
+                  </ol>
                 </div>
               </div>
             </div>
