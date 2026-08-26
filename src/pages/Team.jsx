@@ -2,6 +2,8 @@ import { useEffect, useMemo, useState } from 'react'
 import { Search } from 'lucide-react'
 import './Team.css'
 import { fetchTeamProfilesPageData } from '../lib/queries.js'
+import { filterVisibleProfiles } from '../lib/teamVisibility.js'
+import { useAuth } from '../contexts/AuthContext.jsx'
 import Avatar from '../components/ui/Avatar.jsx'
 
 function roleLabel(role) {
@@ -32,6 +34,7 @@ function startOfMonth(d) {
 }
 
 export default function Team() {
+  const { profile } = useAuth()
   const [query, setQuery] = useState('')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
@@ -60,7 +63,9 @@ export default function Team() {
   }, [])
 
   const computed = useMemo(() => {
-    const profiles = (data?.profiles || []).filter((p) => p.is_active !== false)
+    const allProfiles = data?.profiles || []
+    const scoped = filterVisibleProfiles(profile, allProfiles)
+    const profiles = scoped.filter((p) => p.is_active !== false)
     const stages = (data?.pipeline_stages || []).filter((s) => s.is_active !== false)
     const entries = data?.pipeline_entries || []
     const meetings = data?.meetings || []
@@ -144,7 +149,6 @@ export default function Team() {
     ]
 
     const cards = Array.from(byAdvisor.values()).map((b) => {
-      // Team page conversion: clients / (clients + pipeline opportunities)
       const denom = b.totalOpps + b.closedClients
       const conversionRate = denom === 0 ? 0 : Math.round((b.closedClients / denom) * 100)
 
@@ -171,7 +175,7 @@ export default function Team() {
     })
 
     return { profiles, stages, cards }
-  }, [data])
+  }, [data, profile])
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase()
@@ -184,12 +188,19 @@ export default function Team() {
     })
   }, [computed.cards, query])
 
+  const subtitle =
+    profile?.role === 'admin'
+      ? 'Everyone’s performance across the org'
+      : profile?.role === 'manager'
+        ? 'You and your downline'
+        : 'You and advisors who share your manager'
+
   return (
     <div>
       <div className="pageHeader">
         <div>
           <h1 className="pageTitle">Team Profiles</h1>
-          <div className="pageSubtitle">Active employees and performance metrics</div>
+          <div className="pageSubtitle">{subtitle}</div>
         </div>
 
         <div className="teamHeaderRight">
@@ -211,13 +222,13 @@ export default function Team() {
       ) : null}
 
       <div className="teamCards">
-        {loading ? (
+        {loading || !profile ? (
           <div className="card" style={{ padding: 14 }}>
             <div className="muted">Loading team…</div>
           </div>
         ) : filtered.length === 0 ? (
           <div className="card" style={{ padding: 14 }}>
-            <div className="muted">No active employees match your search.</div>
+            <div className="muted">No active teammates to show yet.</div>
           </div>
         ) : (
           filtered.map(({ profile: p, metrics, stageRows, maxStageCount }) => (
@@ -295,4 +306,3 @@ export default function Team() {
     </div>
   )
 }
-

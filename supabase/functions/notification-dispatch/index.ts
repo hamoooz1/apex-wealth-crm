@@ -1,5 +1,6 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { resolveAppUrl } from "../_shared/appUrl.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -203,7 +204,7 @@ async function processUser(
       .maybeSingle();
 
     if (!existing?.emailed_at) {
-      const html = `<p>Hi ${profile.full_name || "there"},</p><p>Here are your Apex CRM reminders:</p><ul>${emailLines.map((l) => `<li>${l.replace(/^•\s*/, "")}</li>`).join("")}</ul><p><a href="${Deno.env.get("APP_URL") || "https://example.com"}/dashboard">Open Apex CRM</a></p>`;
+      const html = `<p>Hi ${profile.full_name || "there"},</p><p>Here are your Apex CRM reminders:</p><ul>${emailLines.map((l) => `<li>${l.replace(/^•\s*/, "")}</li>`).join("")}</ul><p><a href="${resolveAppUrl()}/dashboard">Open Apex CRM</a></p>`;
       const result = await sendEmail({
         to: profile.email,
         subject: `Apex CRM reminders — ${today}`,

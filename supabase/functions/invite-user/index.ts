@@ -1,6 +1,7 @@
 /// <reference deno.land/x/types/index.d.ts />
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { authRedirectTo, resolveAppUrl } from "../_shared/appUrl.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -28,7 +29,7 @@ Deno.serve(async (req) => {
 
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-    const appUrl = Deno.env.get("APP_URL") || "";
+    const appUrl = resolveAppUrl();
     const adminClient = createClient(supabaseUrl, serviceRoleKey);
 
     const authHeader = req.headers.get("Authorization") || "";
@@ -53,8 +54,12 @@ Deno.serve(async (req) => {
     if (profErr || !callerProfile) {
       return json({ error: "Caller profile missing" }, 403);
     }
-    if (callerProfile.role !== "admin") {
-      return json({ error: "Admin only" }, 403);
+
+    const callerRole = callerProfile.role;
+    const isAdmin = callerRole === "admin";
+    const isManager = callerRole === "manager";
+    if (!isAdmin && !isManager) {
+      return json({ error: "Admin or manager only" }, 403);
     }
 
     const { email, full_name, role, manager_id } = await req.json();
@@ -68,16 +73,27 @@ Deno.serve(async (req) => {
       return json({ error: "Enter a valid email address" }, 400);
     }
 
-    const inviteRole = role === "admin" || role === "manager" || role === "advisor" ? role : "advisor";
+    let inviteRole =
+      role === "admin" || role === "manager" || role === "advisor" ? role : "advisor";
     let managerId: string | null = manager_id || null;
+
+    // Managers may only invite advisors onto their own team.
+    if (isManager) {
+      inviteRole = "advisor";
+      managerId = callerId;
+    }
+
     if (managerId) {
       const { data: mgr } = await adminClient
         .from("profiles")
-        .select("id")
+        .select("id, role")
         .eq("id", managerId)
         .maybeSingle();
       if (!mgr?.id) {
         return json({ error: "Selected manager was not found" }, 400);
+      }
+      if (mgr.role !== "admin" && mgr.role !== "manager") {
+        return json({ error: "Manager must be an admin or manager" }, 400);
       }
     }
 
@@ -86,7 +102,7 @@ Deno.serve(async (req) => {
       role: inviteRole,
       manager_id: managerId,
     };
-    const redirectTo = appUrl ? `${appUrl.replace(/\/$/, "")}/` : undefined;
+    const redirectTo = authRedirectTo(appUrl);
 
     async function syncProfile(userId: string) {
       const { error: updateErr } = await adminClient

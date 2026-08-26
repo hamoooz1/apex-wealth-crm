@@ -1,11 +1,33 @@
 import { supabase } from './supabaseClient.js'
 import { parseInvokeError } from './edgeFunctions.js'
 
+const PUBLIC_APP_URL = (
+  import.meta.env.VITE_APP_URL || 'https://apex-wealth-crm.vercel.app'
+).replace(/\/$/, '')
+
+function isLocalHost(hostname) {
+  const host = String(hostname || '').toLowerCase()
+  return (
+    host === 'localhost' ||
+    host === '127.0.0.1' ||
+    host === '0.0.0.0' ||
+    host === '::1' ||
+    host.endsWith('.localhost')
+  )
+}
+
 export function passwordResetRedirectUrl() {
   if (typeof window !== 'undefined' && window.location?.origin) {
-    return `${window.location.origin}/`
+    const origin = window.location.origin
+    try {
+      if (!isLocalHost(new URL(origin).hostname)) {
+        return `${origin}/`
+      }
+    } catch {
+      // fall through to the public URL
+    }
   }
-  return undefined
+  return `${PUBLIC_APP_URL}/`
 }
 
 /** Self-service: sends a password reset email to the signed-out user. */

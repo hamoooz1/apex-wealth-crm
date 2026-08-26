@@ -1,6 +1,7 @@
 /// <reference deno.land/x/types/index.d.ts />
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { authRedirectTo, resolveAppUrl } from "../_shared/appUrl.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -28,7 +29,7 @@ Deno.serve(async (req) => {
 
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-    const appUrl = Deno.env.get("APP_URL") || "";
+    const appUrl = resolveAppUrl();
     const adminClient = createClient(supabaseUrl, serviceRoleKey);
 
     const authHeader = req.headers.get("Authorization") || "";
@@ -51,8 +52,11 @@ Deno.serve(async (req) => {
     if (profErr || !callerProfile) {
       return json({ error: "Caller profile missing" }, 403);
     }
-    if (callerProfile.role !== "admin") {
-      return json({ error: "Admin only" }, 403);
+
+    const isAdmin = callerProfile.role === "admin";
+    const isManager = callerProfile.role === "manager";
+    if (!isAdmin && !isManager) {
+      return json({ error: "Admin or manager only" }, 403);
     }
 
     const { email } = await req.json();
@@ -67,7 +71,7 @@ Deno.serve(async (req) => {
 
     const { data: targetProfile } = await adminClient
       .from("profiles")
-      .select("id")
+      .select("id, manager_id")
       .eq("email", normalizedEmail)
       .maybeSingle();
 
@@ -75,7 +79,36 @@ Deno.serve(async (req) => {
       return json({ error: "No team member found with that email" }, 404);
     }
 
-    const redirectTo = appUrl ? `${appUrl.replace(/\/$/, "")}/` : undefined;
+    if (isManager) {
+      // Recursive downline check (reports + reports-of-reports)
+      const { data: allProfiles, error: treeErr } = await adminClient
+        .from("profiles")
+        .select("id, manager_id");
+      if (treeErr) return json({ error: treeErr.message }, 400);
+
+      const byManager = new Map<string, string[]>();
+      for (const row of allProfiles || []) {
+        if (!row.manager_id) continue;
+        const list = byManager.get(row.manager_id) || [];
+        list.push(row.id);
+        byManager.set(row.manager_id, list);
+      }
+      const downline = new Set<string>();
+      const stack = [...(byManager.get(callerProfile.id) || [])];
+      while (stack.length) {
+        const id = stack.pop()!;
+        if (downline.has(id)) continue;
+        downline.add(id);
+        const kids = byManager.get(id);
+        if (kids?.length) stack.push(...kids);
+      }
+
+      if (!downline.has(targetProfile.id)) {
+        return json({ error: "You can only reset passwords for people in your downline" }, 403);
+      }
+    }
+
+    const redirectTo = authRedirectTo(appUrl);
     const { error: resetErr } = await adminClient.auth.resetPasswordForEmail(normalizedEmail, {
       redirectTo,
     });

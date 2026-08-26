@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Eye, EyeOff, Plus, Save, ShieldCheck, Upload } from 'lucide-react'
+import { CalendarDays, Camera, Eye, EyeOff, Plus, Save, Video } from 'lucide-react'
 import './Settings.css'
 import { useAuth } from '../contexts/AuthContext.jsx'
 import {
@@ -15,6 +15,11 @@ import { dispatchMyReminders } from '../lib/notifications.js'
 import { supabase } from '../lib/supabaseClient.js'
 import { inviteUser } from '../lib/invite.js'
 import { adminSendPasswordReset } from '../lib/auth.js'
+import {
+  canEditTeamMember as canEditTeamMemberFn,
+  canManageTeamTab,
+  filterVisibleProfiles,
+} from '../lib/teamVisibility.js'
 import Avatar from '../components/ui/Avatar.jsx'
 import Select from '../components/ui/Select.jsx'
 
@@ -30,10 +35,38 @@ const roleOptions = [
   { value: 'advisor', label: 'Advisor' },
 ]
 
+function Switch({ checked, onChange, disabled, labelledBy }) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      aria-labelledby={labelledBy}
+      className={['sSwitch', checked ? 'isOn' : null].filter(Boolean).join(' ')}
+      disabled={disabled}
+      onClick={() => onChange(!checked)}
+    >
+      <span className="sSwitchThumb" />
+    </button>
+  )
+}
+
+function calendlyDisplay(uri) {
+  if (!uri) return 'Not connected'
+  const slug = String(uri).split('/').filter(Boolean).pop()
+  return slug || uri
+}
+
 export default function Settings() {
   const { profile, user, refreshProfile, profileLoading, profileError } = useAuth()
   const isAdmin = profile?.role === 'admin'
+  const isManager = profile?.role === 'manager'
+  const canManageTeam = canManageTeamTab(profile)
   const [activeTab, setActiveTab] = useState('profile')
+
+  useEffect(() => {
+    if (activeTab === 'team' && !canManageTeam) setActiveTab('profile')
+  }, [activeTab, canManageTeam])
 
   // Land on the Integrations tab after an OAuth redirect (?zoom=connected|error or ?calendly=...)
   useEffect(() => {
@@ -290,7 +323,7 @@ export default function Settings() {
     }
   }
 
-  // Section 5: Team Management (Admin only)
+  // Section 5: Team Management (Admin: all users · Manager: direct reports · Advisor: no access)
   const [team, setTeam] = useState([])
   const [teamLoading, setTeamLoading] = useState(false)
   const [teamError, setTeamError] = useState(null)
@@ -306,18 +339,95 @@ export default function Settings() {
     manager_id: '',
   })
 
-  const managers = useMemo(() => team.filter((p) => p.role !== 'advisor'), [team])
-  const byId = useMemo(() => new Map(team.map((p) => [p.id, p])), [team])
+  const managers = useMemo(() => team.filter((p) => p.role === 'admin' || p.role === 'manager'), [team])
+  const visibleTeam = useMemo(() => filterVisibleProfiles(profile, team), [profile, team])
+  const canEditMember = (member) => canEditTeamMemberFn(profile, member, team)
 
-  function managerName(managerId) {
-    if (!managerId) return '—'
-    return byId.get(managerId)?.full_name || '—'
+  useEffect(() => {
+    if (!canManageTeam || !profile?.id) return
+    let mounted = true
+    async function loadTeam() {
+      setTeamLoading(true)
+      setTeamError(null)
+      try {
+        const rows = await fetchProfilesPageData()
+        if (!mounted) return
+        setTeam(rows)
+      } catch (e) {
+        if (!mounted) return
+        setTeamError(e)
+      } finally {
+        if (mounted) setTeamLoading(false)
+      }
+    }
+    loadTeam()
+    return () => {
+      mounted = false
+    }
+  }, [canManageTeam, profile?.id])
+
+  async function onSendPasswordReset(member) {
+    if (!canEditMember(member)) {
+      setInviteError(new Error('You can only reset passwords for your direct reports.'))
+      return
+    }
+    setInviteError(null)
+    setInviteSuccess(null)
+    setResetSendingId(member.id)
+    try {
+      await adminSendPasswordReset(member.email)
+      setInviteSuccess(`Password reset email sent to ${member.email}.`)
+    } catch (e) {
+      setInviteError(e)
+    } finally {
+      setResetSendingId(null)
+    }
+  }
+
+  async function onAddUser() {
+    setInviteError(null)
+    setInviteSuccess(null)
+    setInviteForm({
+      email: '',
+      full_name: '',
+      role: 'advisor',
+      manager_id: isAdmin ? '' : profile?.id || '',
+    })
+    setInviteOpen(true)
+  }
+
+  async function updateTeamRow(id, patch) {
+    const target = team.find((p) => p.id === id)
+    if (!target) return
+
+    if (!canEditMember(target)) {
+      setTeamError(new Error('You can only update people on your team.'))
+      return
+    }
+
+    if (!isAdmin) {
+      // Managers may only change active status (not role / manager assignment).
+      const allowed = {}
+      if ('is_active' in patch) allowed.is_active = patch.is_active
+      if (!Object.keys(allowed).length) {
+        setTeamError(new Error('Managers can only change active status for their reports.'))
+        return
+      }
+      patch = allowed
+    }
+
+    setTeamError(null)
+    setTeam((prev) => prev.map((p) => (p.id === id ? { ...p, ...patch } : p)))
+    try {
+      await updateProfileById(id, patch)
+    } catch (e) {
+      setTeamError(e)
+    }
   }
 
   async function ensureProfileRowExists() {
     if (profile) return profile
     if (!user?.id) return null
-    // If there's no row (common when no auth trigger exists), try to create one.
     const payload = {
       id: user.id,
       full_name: user.user_metadata?.full_name || user.email?.split('@')?.[0] || 'New User',
@@ -385,7 +495,6 @@ export default function Settings() {
     setPwError(null)
     setPwSaving(true)
     try {
-      // Supabase does not validate "current password" client-side; keep it as UI guard.
       const { error } = await supabase.auth.updateUser({ password: pw.next })
       if (error) throw error
       setPw({ current: '', next: '', confirm: '' })
@@ -428,74 +537,17 @@ export default function Settings() {
     }
   }
 
-  useEffect(() => {
-    if (!isAdmin) return
-    let mounted = true
-    async function loadTeam() {
-      setTeamLoading(true)
-      setTeamError(null)
-      try {
-        const rows = await fetchProfilesPageData()
-        if (!mounted) return
-        setTeam(rows)
-      } catch (e) {
-        if (!mounted) return
-        setTeamError(e)
-      } finally {
-        if (mounted) setTeamLoading(false)
-      }
-    }
-    loadTeam()
-    return () => {
-      mounted = false
-    }
-  }, [isAdmin])
-
-  async function onSendPasswordReset(member) {
-    setInviteError(null)
-    setInviteSuccess(null)
-    setResetSendingId(member.id)
-    try {
-      await adminSendPasswordReset(member.email)
-      setInviteSuccess(`Password reset email sent to ${member.email}.`)
-    } catch (e) {
-      setInviteError(e)
-    } finally {
-      setResetSendingId(null)
-    }
-  }
-
-  async function onAddUser() {
-    setInviteError(null)
-    setInviteSuccess(null)
-    setInviteOpen(true)
-  }
-
-  async function updateTeamRow(id, patch) {
-    setTeamError(null)
-    setTeam((prev) => prev.map((p) => (p.id === id ? { ...p, ...patch } : p)))
-    try {
-      await updateProfileById(id, patch)
-    } catch (e) {
-      setTeamError(e)
-    }
-  }
-
-  function deactivateUser(id) {
-    updateTeamRow(id, { is_active: false })
-  }
-
   return (
     <div>
       <div className="pageHeader">
         <div>
           <h1 className="pageTitle">Settings</h1>
-          <div className="pageSubtitle">Manage your account and system settings</div>
+          <div className="pageSubtitle">Your account, alerts, and connected tools</div>
         </div>
       </div>
 
       <div className="settingsShell">
-        <div className="settingsNav settingsNavTop" role="tablist" aria-label="Settings sections">
+        <div className="settingsNavTop" role="tablist" aria-label="Settings sections">
           <button
             type="button"
             className={['settingsTab', activeTab === 'profile' ? 'isActive' : null].filter(Boolean).join(' ')}
@@ -532,7 +584,7 @@ export default function Settings() {
           >
             Integrations
           </button>
-          {isAdmin ? (
+          {canManageTeam ? (
             <button
               type="button"
               className={['settingsTab', activeTab === 'team' ? 'isActive' : null].filter(Boolean).join(' ')}
@@ -551,7 +603,7 @@ export default function Settings() {
               <div className="cardHeader">
                 <div>
                   <div className="cardTitle">Profile</div>
-                  <div className="muted">Account details</div>
+                  <div className="muted">How you appear to the team</div>
                 </div>
               </div>
               <div className="settingsBody">
@@ -563,38 +615,31 @@ export default function Settings() {
                   <div className="inlineError">{profileSaveError.message || 'Failed to save profile.'}</div>
                 ) : null}
 
-                <div className="settingsRow">
-                  <Avatar name={myProfile.full_name || 'Apex User'} src={myProfile.avatar_url || ''} size="lg" />
-                  <div className="settingsRowMain">
-                    <div className="settingsRowTitle">{myProfile.full_name || 'Apex User'}</div>
-                    <div className="settingsRowSub">{myProfile.email || user?.email || '—'}</div>
-                  </div>
-                  <div className="settingsRowRight">
-                    <span className={['sBadge', `role-${myProfile.role}`].join(' ')}>
-                      <ShieldCheck size={14} />
-                      {roleLabel(myProfile.role)}
+                <div className="settingsIdentity">
+                  <label className="settingsAvatarBtn" title="Change photo">
+                    <Avatar name={myProfile.full_name || 'Apex User'} src={myProfile.avatar_url || ''} size="xl" />
+                    <span className="settingsAvatarCam">
+                      <Camera size={13} />
                     </span>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      hidden
+                      onChange={(e) => uploadAvatar(e.target.files?.[0])}
+                    />
+                  </label>
+                  <div className="settingsIdentityMain">
+                    <div className="settingsIdentityName">{myProfile.full_name || 'Apex User'}</div>
+                    <div className="settingsIdentityEmail">{myProfile.email || user?.email || '—'}</div>
                   </div>
+                  <span className={['sBadge', `role-${myProfile.role}`].join(' ')}>
+                    {roleLabel(myProfile.role)}
+                  </span>
                 </div>
 
-                <div className="formGrid" style={{ marginTop: 12 }}>
-                  <div className="sField" style={{ gridColumn: '1 / -1' }}>
-                    <div className="sLabel">Profile picture</div>
-                    <label className="btnSecondary settingsUploadBtn">
-                      <Upload size={16} />
-                      Upload
-                      <input
-                        type="file"
-                        accept="image/*"
-                        style={{ display: 'none' }}
-                        onChange={(e) => uploadAvatar(e.target.files?.[0])}
-                      />
-                    </label>
-                    <div className="sHint">PNG/JPG, square preferred.</div>
-                  </div>
-
+                <div className="formGrid">
                   <label className="sField">
-                    <div className="sLabel">Full Name</div>
+                    <div className="sLabel">Full name</div>
                     <input
                       className="sInput"
                       value={myProfile.full_name}
@@ -605,20 +650,23 @@ export default function Settings() {
                   <label className="sField">
                     <div className="sLabel">Email</div>
                     <input className="sInput" value={myProfile.email} readOnly />
+                    <div className="sHint">Email is set from your login and can’t be changed here.</div>
                   </label>
 
                   {isAdmin ? (
-                    <label className="sToggleRow">
+                    <div className="sToggleRow">
                       <div>
-                        <div className="sLabel">Active status</div>
-                        <div className="sHint">Only admins can change this for themselves</div>
+                        <div className="sLabel" id="active-status-label">
+                          Active on the team
+                        </div>
+                        <div className="sHint">Turn this off to hide yourself from assignment lists.</div>
                       </div>
-                      <input
-                        type="checkbox"
+                      <Switch
                         checked={myProfile.is_active}
-                        onChange={(e) => setMyProfile((p) => ({ ...p, is_active: e.target.checked }))}
+                        labelledBy="active-status-label"
+                        onChange={(v) => setMyProfile((p) => ({ ...p, is_active: v }))}
                       />
-                    </label>
+                    </div>
                   ) : null}
                 </div>
 
@@ -630,7 +678,7 @@ export default function Settings() {
                     disabled={!profileDirty || savingProfile}
                   >
                     <Save size={16} />
-                    {savingProfile ? 'Saving…' : 'Save'}
+                    {savingProfile ? 'Saving…' : 'Save changes'}
                   </button>
                 </div>
               </div>
@@ -642,45 +690,51 @@ export default function Settings() {
               <div className="cardHeader">
                 <div>
                   <div className="cardTitle">Password</div>
-                  <div className="muted">Update your password</div>
+                  <div className="muted">Choose a password that’s at least 8 characters</div>
                 </div>
               </div>
               <div className="settingsBody">
-                <div className="pwRow">
-                  <div className="pwGrid">
-                    <label className="sField">
-                      <div className="sLabel">Current password</div>
+                <div className="settingsNarrow">
+                  <label className="sField">
+                    <div className="sLabel">Current password</div>
+                    <div className="sInputWrap">
                       <input
                         className="sInput"
                         type={showPw ? 'text' : 'password'}
                         value={pw.current}
+                        autoComplete="current-password"
                         onChange={(e) => setPw((x) => ({ ...x, current: e.target.value }))}
                       />
-                    </label>
-                    <label className="sField">
-                      <div className="sLabel">New password</div>
-                      <input
-                        className="sInput"
-                        type={showPw ? 'text' : 'password'}
-                        value={pw.next}
-                        onChange={(e) => setPw((x) => ({ ...x, next: e.target.value }))}
-                      />
-                    </label>
-                    <label className="sField">
-                      <div className="sLabel">Confirm password</div>
-                      <input
-                        className="sInput"
-                        type={showPw ? 'text' : 'password'}
-                        value={pw.confirm}
-                        onChange={(e) => setPw((x) => ({ ...x, confirm: e.target.value }))}
-                      />
-                    </label>
-                  </div>
-
-                  <button className="btnSecondary pwToggle" type="button" onClick={() => setShowPw((s) => !s)}>
-                    {showPw ? <EyeOff size={16} /> : <Eye size={16} />}
-                    {showPw ? 'Hide' : 'Show'}
-                  </button>
+                      <button
+                        className="sEyeBtn"
+                        type="button"
+                        aria-label={showPw ? 'Hide passwords' : 'Show passwords'}
+                        onClick={() => setShowPw((s) => !s)}
+                      >
+                        {showPw ? <EyeOff size={16} /> : <Eye size={16} />}
+                      </button>
+                    </div>
+                  </label>
+                  <label className="sField">
+                    <div className="sLabel">New password</div>
+                    <input
+                      className="sInput"
+                      type={showPw ? 'text' : 'password'}
+                      value={pw.next}
+                      autoComplete="new-password"
+                      onChange={(e) => setPw((x) => ({ ...x, next: e.target.value }))}
+                    />
+                  </label>
+                  <label className="sField">
+                    <div className="sLabel">Confirm new password</div>
+                    <input
+                      className="sInput"
+                      type={showPw ? 'text' : 'password'}
+                      value={pw.confirm}
+                      autoComplete="new-password"
+                      onChange={(e) => setPw((x) => ({ ...x, confirm: e.target.value }))}
+                    />
+                  </label>
                 </div>
 
                 {pwMismatch ? <div className="inlineError">Passwords do not match</div> : null}
@@ -696,7 +750,7 @@ export default function Settings() {
                     onClick={onUpdatePassword}
                     disabled={!pwValid || pwSaving}
                   >
-                    {pwSaving ? 'Updating…' : 'Update Password'}
+                    {pwSaving ? 'Updating…' : 'Update password'}
                   </button>
                 </div>
               </div>
@@ -707,8 +761,8 @@ export default function Settings() {
             <div className="card settingsCard">
               <div className="cardHeader">
                 <div>
-                  <div className="cardTitle">Preferences</div>
-                  <div className="muted">Notification settings</div>
+                  <div className="cardTitle">Notifications</div>
+                  <div className="muted">Choose what Apex sends you</div>
                 </div>
               </div>
               <div className="settingsBody">
@@ -716,49 +770,55 @@ export default function Settings() {
                   <div className="inlineError">{prefsError.message || 'Failed to save preferences.'}</div>
                 ) : null}
                 <div className="prefsGrid">
-                  <label className="sToggleRow">
+                  <div className="sToggleRow">
                     <div>
-                      <div className="sLabel">Email notifications</div>
+                      <div className="sLabel" id="pref-email-label">
+                        Email notifications
+                      </div>
                       <div className="sHint">Account alerts and CRM updates</div>
                     </div>
-                    <input
-                      type="checkbox"
+                    <Switch
                       checked={prefs.email_notifications}
-                      onChange={(e) => setPrefs((p) => ({ ...p, email_notifications: e.target.checked }))}
+                      labelledBy="pref-email-label"
+                      onChange={(v) => setPrefs((p) => ({ ...p, email_notifications: v }))}
                     />
-                  </label>
-                  <label className="sToggleRow">
+                  </div>
+                  <div className="sToggleRow">
                     <div>
-                      <div className="sLabel">Task reminders</div>
-                      <div className="sHint">Due date reminders and follow-ups</div>
+                      <div className="sLabel" id="pref-tasks-label">
+                        Task reminders
+                      </div>
+                      <div className="sHint">Due dates and follow-ups</div>
                     </div>
-                    <input
-                      type="checkbox"
+                    <Switch
                       checked={prefs.task_reminders}
-                      onChange={(e) => setPrefs((p) => ({ ...p, task_reminders: e.target.checked }))}
+                      labelledBy="pref-tasks-label"
+                      onChange={(v) => setPrefs((p) => ({ ...p, task_reminders: v }))}
                     />
-                  </label>
-                  <label className="sToggleRow">
+                  </div>
+                  <div className="sToggleRow">
                     <div>
-                      <div className="sLabel">Weekly summary emails</div>
-                      <div className="sHint">Pipeline and activity summary every week</div>
+                      <div className="sLabel" id="pref-weekly-label">
+                        Weekly summary
+                      </div>
+                      <div className="sHint">Pipeline and activity recap once a week</div>
                     </div>
-                    <input
-                      type="checkbox"
+                    <Switch
                       checked={prefs.weekly_summary}
-                      onChange={(e) => setPrefs((p) => ({ ...p, weekly_summary: e.target.checked }))}
+                      labelledBy="pref-weekly-label"
+                      onChange={(v) => setPrefs((p) => ({ ...p, weekly_summary: v }))}
                     />
-                  </label>
+                  </div>
                 </div>
                 {remindersMsg ? <div className="inlineHint">{remindersMsg}</div> : null}
-                <div className="settingsFooter" style={{ justifyContent: 'space-between', flexWrap: 'wrap', gap: 10 }}>
+                <div className="settingsFooter settingsFooterSplit">
                   <button
                     className="btnSecondary"
                     type="button"
                     onClick={onRefreshReminders}
                     disabled={remindersBusy}
                   >
-                    {remindersBusy ? 'Refreshing…' : 'Refresh reminders now'}
+                    {remindersBusy ? 'Sending…' : 'Send reminders now'}
                   </button>
                   <button
                     className="btnPrimary"
@@ -767,7 +827,7 @@ export default function Settings() {
                     disabled={!prefsDirty || prefsSaving}
                   >
                     <Save size={16} />
-                    {prefsSaving ? 'Saving…' : 'Save Preferences'}
+                    {prefsSaving ? 'Saving…' : 'Save'}
                   </button>
                 </div>
               </div>
@@ -775,190 +835,129 @@ export default function Settings() {
           ) : null}
 
           {activeTab === 'integrations' ? (
-            <div className="card settingsCard">
-              <div className="cardHeader">
-                <div>
-                  <div className="cardTitle">Calendly</div>
-                  <div className="muted">Connect your scheduling account</div>
-                </div>
-              </div>
-              <div className="settingsBody">
-                {calendlyError ? (
-                  <div className="inlineError">{calendlyError.message || 'Calendly integration error.'}</div>
-                ) : null}
-
-                {calendlyLoading ? <div className="inlineHint">Loading Calendly connection…</div> : null}
-
-                <div className="settingsRow">
-                  <div className="settingsRowMain">
-                    <div className="settingsRowTitle">Connection</div>
-                    <div className="settingsRowSub">
-                      {calendlyConn?.calendly_user_uri ? calendlyConn.calendly_user_uri : 'Not connected'}
+            <div className="integrationsGrid">
+              <div className="card settingsCard">
+                <div className="cardHeader">
+                  <div className="integHead">
+                    <div className="integIcon">
+                      <CalendarDays size={18} />
+                    </div>
+                    <div className="integMeta">
+                      <div className="cardTitle">Calendly</div>
+                      <div className="muted">Import scheduled meetings into the calendar</div>
                     </div>
                   </div>
-                  <div className="settingsRowRight">
-                    <span className={['sBadge', calendlyConn ? 'role-advisor' : 'role-manager'].join(' ')}>
-                      {calendlyConn ? 'Connected' : 'Not connected'}
-                    </span>
+                  <span className={['sStatus', calendlyConn ? 'isOn' : null].filter(Boolean).join(' ')}>
+                    {calendlyConn ? 'Connected' : 'Not connected'}
+                  </span>
+                </div>
+                <div className="settingsBody">
+                  {calendlyError ? (
+                    <div className="inlineError">{calendlyError.message || 'Calendly integration error.'}</div>
+                  ) : null}
+                  {calendlyLoading ? <div className="inlineHint">Checking connection…</div> : null}
+                  <div className="sHint">
+                    {calendlyConn
+                      ? calendlyDisplay(calendlyConn.calendly_user_uri)
+                      : 'Connect to pull your bookings into Apex.'}
+                  </div>
+                  {calendlyConn?.webhook_last_error ? (
+                    <div className="inlineHint">
+                      {/calendly account to standard|permission denied|upgrade/i.test(
+                        calendlyConn.webhook_last_error,
+                      )
+                        ? 'Connected. Automatic sync needs a paid Calendly plan — use Sync now on the free plan.'
+                        : `Connected, but automatic sync may be inactive.`}
+                    </div>
+                  ) : null}
+                  {calendlySyncMsg ? <div className="inlineHint">{calendlySyncMsg}</div> : null}
+                  <div className="integActions">
+                    {calendlyConn ? (
+                      <>
+                        <button
+                          className="btnPrimary"
+                          type="button"
+                          onClick={onSyncCalendly}
+                          disabled={calendlySyncing}
+                        >
+                          {calendlySyncing ? 'Syncing…' : 'Sync now'}
+                        </button>
+                        <button
+                          className="btnSecondary"
+                          type="button"
+                          onClick={onDisconnectCalendly}
+                          disabled={calendlyLoading}
+                        >
+                          Disconnect
+                        </button>
+                      </>
+                    ) : (
+                      <button className="btnPrimary" type="button" onClick={onConnectCalendly} disabled={calendlyLoading}>
+                        {calendlyLoading ? 'Connecting…' : 'Connect'}
+                      </button>
+                    )}
                   </div>
                 </div>
+              </div>
 
-                {calendlyConn?.webhook_last_error ? (
-                  <div className="inlineHint" style={{ marginTop: 10 }}>
-                    {/calendly account to standard|permission denied|upgrade/i.test(
-                      calendlyConn.webhook_last_error,
-                    )
-                      ? 'Your account is connected. Automatic meeting sync uses Calendly webhooks, which require a paid Calendly plan (Standard or higher). On the free plan, use “Sync now” below to import your meetings on demand.'
-                      : `Connected, but automatic meeting sync may be inactive: ${calendlyConn.webhook_last_error}`}
+              <div className="card settingsCard">
+                <div className="cardHeader">
+                  <div className="integHead">
+                    <div className="integIcon">
+                      <Video size={18} />
+                    </div>
+                    <div className="integMeta">
+                      <div className="cardTitle">Zoom</div>
+                      <div className="muted">Create meeting links when you schedule</div>
+                    </div>
                   </div>
-                ) : null}
-
-                {calendlySyncMsg ? (
-                  <div className="inlineHint" style={{ marginTop: 10 }}>
-                    {calendlySyncMsg}
+                  <span className={['sStatus', zoomConn ? 'isOn' : null].filter(Boolean).join(' ')}>
+                    {zoomConn ? 'Connected' : 'Not connected'}
+                  </span>
+                </div>
+                <div className="settingsBody">
+                  {zoomError ? (
+                    <div className="inlineError">{zoomError.message || 'Zoom integration error.'}</div>
+                  ) : null}
+                  {zoomLoading ? <div className="inlineHint">Checking connection…</div> : null}
+                  <div className="sHint">
+                    {zoomConn?.email || zoomConn?.zoom_user_id || 'Connect to generate Zoom links from the CRM.'}
                   </div>
-                ) : null}
-
-                <div className="settingsFooter settingsFooterSplit">
-                  {calendlyConn ? (
-                    <div style={{ display: 'flex', gap: 8 }}>
-                      <button
-                        className="btnPrimary"
-                        type="button"
-                        onClick={onSyncCalendly}
-                        disabled={calendlySyncing}
-                      >
-                        {calendlySyncing ? 'Syncing…' : 'Sync now'}
-                      </button>
+                  <div className="integActions">
+                    {zoomConn ? (
                       <button
                         className="btnSecondary"
                         type="button"
-                        onClick={onDisconnectCalendly}
-                        disabled={calendlyLoading}
+                        onClick={onDisconnectZoom}
+                        disabled={zoomLoading}
                       >
                         Disconnect
                       </button>
-                    </div>
-                  ) : (
-                    <button className="btnPrimary" type="button" onClick={onConnectCalendly} disabled={calendlyLoading}>
-                      {calendlyLoading ? 'Connecting…' : 'Connect Calendly'}
-                    </button>
-                  )}
-
-                  <div className="muted" style={{ fontSize: 11 }}>
-                    Advisors can only see their own meetings. Admins can see all.
+                    ) : (
+                      <button className="btnPrimary" type="button" onClick={onConnectZoom} disabled={zoomLoading}>
+                        {zoomLoading ? 'Connecting…' : 'Connect'}
+                      </button>
+                    )}
                   </div>
                 </div>
               </div>
             </div>
           ) : null}
 
-          {activeTab === 'integrations' ? (
+          {canManageTeam && activeTab === 'team' ? (
             <div className="card settingsCard">
               <div className="cardHeader">
                 <div>
-                  <div className="cardTitle">Zoom</div>
-                  <div className="muted">Create Zoom meetings straight from the CRM</div>
-                </div>
-              </div>
-              <div className="settingsBody">
-                {zoomError ? (
-                  <div className="inlineError">{zoomError.message || 'Zoom integration error.'}</div>
-                ) : null}
-
-                {zoomLoading ? <div className="inlineHint">Loading Zoom connection…</div> : null}
-
-                <div className="settingsRow">
-                  <div className="settingsRowMain">
-                    <div className="settingsRowTitle">Connection</div>
-                    <div className="settingsRowSub">
-                      {zoomConn?.email || zoomConn?.zoom_user_id || 'Not connected'}
-                    </div>
+                  <div className="cardTitle">Team</div>
+                  <div className="muted">
+                    {isAdmin
+                      ? 'Full org roster — edit anyone’s role, manager, and access'
+                      : 'Your downline — direct reports and their reports'}
                   </div>
-                  <div className="settingsRowRight">
-                    <span className={['sBadge', zoomConn ? 'role-advisor' : 'role-manager'].join(' ')}>
-                      {zoomConn ? 'Connected' : 'Not connected'}
-                    </span>
-                  </div>
-                </div>
-
-                <div className="settingsFooter settingsFooterSplit">
-                  {zoomConn ? (
-                    <button
-                      className="btnSecondary"
-                      type="button"
-                      onClick={onDisconnectZoom}
-                      disabled={zoomLoading}
-                    >
-                      Disconnect
-                    </button>
-                  ) : (
-                    <button className="btnPrimary" type="button" onClick={onConnectZoom} disabled={zoomLoading}>
-                      {zoomLoading ? 'Connecting…' : 'Connect Zoom'}
-                    </button>
-                  )}
-
-                  <div className="muted" style={{ fontSize: 11 }}>
-                    Once connected, generate a Zoom link when scheduling a meeting. Cloud recording starts automatically on Zoom Plus accounts.
-                  </div>
-                </div>
-
-                <div className="zoomDeployChecklist">
-                  <div className="settingsRowTitle" style={{ marginBottom: 8 }}>
-                    Development → Production (let every advisor connect their own Zoom)
-                  </div>
-                  <ol className="zoomDeployList">
-                    <li>
-                      Zoom Marketplace → <strong>Apex Wealth Zoom</strong> → open the <strong>Production</strong> tab (not Development).
-                      Complete app info, privacy policy URL, and scopes — mirror everything from Development.
-                    </li>
-                    <li>
-                      Under Production → <strong>Access</strong>, set OAuth redirect URL to{' '}
-                      <code>https://aambpahxxymxxgqijude.supabase.co/functions/v1/zoom-oauth-callback</code>
-                    </li>
-                    <li>
-                      Copy the <strong>Production Client ID</strong> and <strong>Production Client Secret</strong> (they are
-                      different from Development). Update Supabase Edge Function secrets:{' '}
-                      <code>ZOOM_CLIENT_ID</code> and <code>ZOOM_CLIENT_SECRET</code>.
-                    </li>
-                    <li>
-                      In Production → <strong>Event subscriptions</strong>, re-create the webhook (same URL + secret as
-                      Development). Update Supabase secret <code>ZOOM_WEBHOOK_SECRET_TOKEN</code> if the Production secret
-                      differs.
-                    </li>
-                    <li>
-                      Submit the app for <strong>Zoom review</strong>. After approval, any Zoom user can authorize — no test-user list needed.
-                    </li>
-                    <li>
-                      After swapping keys, every user must <strong>Disconnect</strong> then <strong>Connect Zoom</strong> again in Settings
-                      (old Development tokens stop working).
-                    </li>
-                    <li>
-                      <strong>Scopes:</strong> <code>user:read:user</code>, <code>meeting:write:meeting</code>,{' '}
-                      <code>meeting:read:meeting</code>, <code>cloud_recording:read:list_recording_files</code>
-                    </li>
-                    <li>
-                      Webhook events: Start/End meeting, Recording completed, Summary completed, Transcript completed, AIC transcript completed.
-                    </li>
-                    <li>
-                      Each Zoom Plus host: enable <strong>Cloud recording</strong> + <strong>AI Companion meeting summary</strong> in Zoom account settings.
-                    </li>
-                  </ol>
-                </div>
-              </div>
-            </div>
-          ) : null}
-
-          {isAdmin ? (
-            <div className="card settingsCard">
-              <div className="cardHeader">
-                <div>
-                  <div className="cardTitle">Team management</div>
-                  <div className="muted">Manage roles, managers, and active status</div>
                 </div>
                 <button className="btnPrimary" type="button" onClick={onAddUser}>
                   <Plus size={16} />
-                  Invite user
+                  Invite
                 </button>
               </div>
               <div className="settingsBody">
@@ -968,90 +967,117 @@ export default function Settings() {
 
                 <div className="adminTableWrap">
                   <table className="adminTable">
-                  <thead>
-                    <tr>
-                      <th>Name</th>
-                      <th>Email</th>
-                      <th>Role</th>
-                      <th>Manager</th>
-                      <th>Status</th>
-                      <th>Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {teamLoading ? (
+                    <thead>
                       <tr>
-                        <td colSpan={6} className="tMuted">
-                          Loading team…
-                        </td>
+                        <th>Person</th>
+                        <th>Role</th>
+                        <th>Manager</th>
+                        <th>Status</th>
+                        <th></th>
                       </tr>
-                    ) : (
-                      team.map((p) => (
-                      <tr key={p.id}>
-                        <td className="tName">{p.full_name}</td>
-                        <td className="tMuted">{p.email}</td>
-                        <td>
-                          <Select
-                            size="sm"
-                            value={p.role}
-                            onChange={(v) => updateTeamRow(p.id, { role: v })}
-                            options={roleOptions}
-                          />
-                        </td>
-                        <td>
-                          <Select
-                            size="sm"
-                            value={p.manager_id || ''}
-                            onChange={(v) => updateTeamRow(p.id, { manager_id: v || null })}
-                            options={[
-                              { value: '', label: '—' },
-                              ...managers
-                                .filter((m) => m.id !== p.id)
-                                .map((m) => ({ value: m.id, label: m.full_name })),
-                            ]}
-                          />
-                        </td>
-                        <td>
-                          <label className="inlineToggle">
-                            <input
-                              type="checkbox"
-                              checked={!!p.is_active}
-                              onChange={(e) => updateTeamRow(p.id, { is_active: e.target.checked })}
-                            />
-                            <span className={['statusBadge', p.is_active ? 'on' : 'off'].join(' ')}>
-                              {p.is_active ? 'Active' : 'Inactive'}
-                            </span>
-                          </label>
-                        </td>
-                        <td>
-                          <div className="rowActions">
-                            <button
-                              className="btnSecondary"
-                              type="button"
-                              onClick={() => onSendPasswordReset(p)}
-                              disabled={!p.email || resetSendingId === p.id}
-                            >
-                              {resetSendingId === p.id ? 'Sending…' : 'Send reset'}
-                            </button>
-                            <button
-                              className="btnSecondary"
-                              type="button"
-                              onClick={() => deactivateUser(p.id)}
-                              disabled={!p.is_active}
-                            >
-                              Deactivate
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                      ))
-                    )}
-                  </tbody>
+                    </thead>
+                    <tbody>
+                      {teamLoading ? (
+                        <tr>
+                          <td colSpan={5} className="tMuted">
+                            Loading team…
+                          </td>
+                        </tr>
+                      ) : visibleTeam.length === 0 ? (
+                        <tr>
+                          <td colSpan={5}>
+                            <div className="teamEmpty">
+                              <div className="teamEmptyTitle">No teammates yet</div>
+                              <div className="tMuted">Invite someone to give them a login.</div>
+                            </div>
+                          </td>
+                        </tr>
+                      ) : (
+                        visibleTeam.map((p) => {
+                          const editable = canEditMember(p)
+                          const managerName =
+                            managers.find((m) => m.id === p.manager_id)?.full_name ||
+                            team.find((m) => m.id === p.manager_id)?.full_name ||
+                            '—'
+                          return (
+                          <tr key={p.id} className={editable || isAdmin ? undefined : 'teamRowReadonly'}>
+                            <td>
+                              <div className="teamPerson">
+                                <Avatar name={p.full_name || p.email} src={p.avatar_url || ''} size="sm" />
+                                <div className="teamPersonText">
+                                  <div className="tName">{p.full_name || '—'}</div>
+                                  <div className="tMuted">{p.email}</div>
+                                </div>
+                              </div>
+                            </td>
+                            <td>
+                              {isAdmin ? (
+                                <Select
+                                  size="sm"
+                                  value={p.role}
+                                  onChange={(v) => updateTeamRow(p.id, { role: v })}
+                                  options={roleOptions}
+                                />
+                              ) : (
+                                <span className={['sBadge', `role-${p.role}`].join(' ')}>
+                                  {roleLabel(p.role)}
+                                </span>
+                              )}
+                            </td>
+                            <td>
+                              {isAdmin ? (
+                                <Select
+                                  size="sm"
+                                  value={p.manager_id || ''}
+                                  onChange={(v) => updateTeamRow(p.id, { manager_id: v || null })}
+                                  options={[
+                                    { value: '', label: '—' },
+                                    ...managers
+                                      .filter((m) => m.id !== p.id)
+                                      .map((m) => ({ value: m.id, label: m.full_name })),
+                                  ]}
+                                />
+                              ) : (
+                                <span className="tMuted">{managerName}</span>
+                              )}
+                            </td>
+                            <td>
+                              <div className="teamStatusCell">
+                                <Switch
+                                  checked={!!p.is_active}
+                                  labelledBy={`status-${p.id}`}
+                                  disabled={!editable}
+                                  onChange={(v) => updateTeamRow(p.id, { is_active: v })}
+                                />
+                                <span id={`status-${p.id}`} className="tMuted">
+                                  {p.is_active ? 'Active' : 'Off'}
+                                </span>
+                              </div>
+                            </td>
+                            <td>
+                              <div className="rowActions">
+                                <button
+                                  className="btnSecondary"
+                                  type="button"
+                                  onClick={() => onSendPasswordReset(p)}
+                                  disabled={!editable || !p.email || resetSendingId === p.id}
+                                >
+                                  {resetSendingId === p.id ? 'Sending…' : 'Reset password'}
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                          )
+                        })
+                      )}
+                    </tbody>
                   </table>
                 </div>
 
                 <div className="adminHint">
-                  Invites create a real login via an Edge Function. Use <strong>Send reset</strong> if someone cannot sign in or missed their invite email.
+                  {isAdmin
+                    ? 'Invites email a link to set a password. Use Reset password if they never got it.'
+                    : 'You see your reports and their reports. Active status and password resets only work for people in your downline.'}
                 </div>
               </div>
             </div>
@@ -1064,8 +1090,12 @@ export default function Settings() {
           <div className="modalCard">
             <div className="modalHeader">
               <div>
-                <div className="modalTitle">Invite User</div>
-                <div className="modalSub">Send an email invite to join Apex Wealth CRM</div>
+                <div className="modalTitle">{isAdmin ? 'Invite teammate' : 'Invite advisor'}</div>
+                <div className="modalSub">
+                  {isAdmin
+                    ? 'They’ll get an email to join Apex Wealth CRM'
+                    : 'They’ll join your team and get an email to set a password'}
+                </div>
               </div>
               <button className="iconBtn" type="button" onClick={() => setInviteOpen(false)}>
                 ✕
@@ -1074,7 +1104,7 @@ export default function Settings() {
 
             <div className="modalBody">
               <div className="inlineHint" style={{ marginBottom: 12 }}>
-                Invited users must click the email link and set a password before they can sign in here.
+                They’ll set a password from the invite email before signing in.
               </div>
               <div className="formGrid">
                 <label className="sField">
@@ -1097,24 +1127,34 @@ export default function Settings() {
                 </label>
                 <label className="sField">
                   <div className="sLabel">Role</div>
-                  <Select
-                    value={inviteForm.role}
-                    onChange={(v) => setInviteForm((f) => ({ ...f, role: v }))}
-                    options={roleOptions}
-                  />
+                  {isAdmin ? (
+                    <Select
+                      value={inviteForm.role}
+                      onChange={(v) => setInviteForm((f) => ({ ...f, role: v }))}
+                      options={roleOptions}
+                    />
+                  ) : (
+                    <input className="sInput" value="Advisor" readOnly />
+                  )}
                 </label>
                 <label className="sField">
                   <div className="sLabel">Manager</div>
-                  <Select
-                    value={inviteForm.manager_id}
-                    onChange={(v) => setInviteForm((f) => ({ ...f, manager_id: v }))}
-                    options={[
-                      { value: '', label: '—' },
-                      ...managers
-                        .filter((m) => m.id !== profile?.id)
-                        .map((m) => ({ value: m.id, label: m.full_name })),
-                    ]}
-                  />
+                  {isAdmin ? (
+                    <Select
+                      value={inviteForm.manager_id}
+                      onChange={(v) => setInviteForm((f) => ({ ...f, manager_id: v }))}
+                      options={[
+                        { value: '', label: '—' },
+                        ...managers.map((m) => ({ value: m.id, label: m.full_name || m.email })),
+                      ]}
+                    />
+                  ) : (
+                    <input
+                      className="sInput"
+                      value={profile?.full_name || profile?.email || 'You'}
+                      readOnly
+                    />
+                  )}
                 </label>
               </div>
             </div>
@@ -1136,12 +1176,17 @@ export default function Settings() {
                     const result = await inviteUser({
                       email: invitedEmail,
                       full_name: inviteForm.full_name.trim(),
-                      role: inviteForm.role,
-                      manager_id: inviteForm.manager_id || null,
+                      role: isAdmin ? inviteForm.role : 'advisor',
+                      manager_id: isAdmin ? inviteForm.manager_id || null : profile?.id || null,
                     })
                     const rows = await fetchProfilesPageData()
                     setTeam(rows)
-                    setInviteForm({ email: '', full_name: '', role: 'advisor', manager_id: '' })
+                    setInviteForm({
+                      email: '',
+                      full_name: '',
+                      role: 'advisor',
+                      manager_id: isAdmin ? '' : profile?.id || '',
+                    })
                     setInviteOpen(false)
                     setInviteSuccess(
                       result?.existing
