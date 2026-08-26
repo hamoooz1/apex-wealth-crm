@@ -706,7 +706,7 @@ export default function ClientDetail() {
                 accept=".pdf,.doc,.docx,.xls,.xlsx,.png,.jpg,.jpeg,.txt,.csv"
               />
             </label>
-            <div className="sHint">Statements, agreements, KYC forms — up to 50 MB.</div>
+            <div className="sHint">Sales packages, Supervision form, KYC, Signed application, Strategy doc, and any compliance document — up to 50 MB.</div>
           </div>
 
           {docError ? (
