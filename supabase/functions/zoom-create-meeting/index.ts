@@ -108,16 +108,36 @@ Deno.serve(async (req: Request) => {
     try {
       const refreshed = await refreshAccessToken(ZOOM_CLIENT_ID, ZOOM_CLIENT_SECRET, tok.refresh_token);
       accessToken = refreshed.access_token;
+      const tokenExpiresAt = new Date(Date.now() + Number(refreshed.expires_in || 3600) * 1000).toISOString();
       await supabaseAdmin
         .from("zoom_connection_tokens")
         .update({
           access_token: refreshed.access_token,
           refresh_token: refreshed.refresh_token ?? tok.refresh_token,
-          token_expires_at: new Date(Date.now() + Number(refreshed.expires_in || 3600) * 1000).toISOString(),
+          token_expires_at: tokenExpiresAt,
         })
         .eq("connection_id", conn.id);
+      const health = await supabaseAdmin
+        .from("zoom_connections")
+        .update({
+          token_expires_at: tokenExpiresAt,
+          token_status: "valid",
+          token_status_at: new Date().toISOString(),
+          last_sync_error: null,
+        })
+        .eq("id", conn.id);
+      if (health.error) console.warn("[zoom-create-meeting] health mirror skipped", health.error.message);
     } catch (e) {
-      return json({ error: (e as Error).message || "Token refresh failed" }, { status: 502, headers: cors });
+      const message = (e as Error).message || "Token refresh failed";
+      await supabaseAdmin
+        .from("zoom_connections")
+        .update({
+          token_status: "refresh_failed",
+          token_status_at: new Date().toISOString(),
+          last_sync_error: message.slice(0, 300),
+        })
+        .eq("id", conn.id);
+      return json({ error: message }, { status: 502, headers: cors });
     }
   }
 

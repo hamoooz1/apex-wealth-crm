@@ -310,6 +310,17 @@ Deno.serve(async (req: Request) => {
       );
     if (tokErr) throw tokErr;
 
+    const health = await supabaseAdmin
+      .from("calendly_connections")
+      .update({
+        token_expires_at: tokenExpiresAt,
+        token_status: "valid",
+        token_status_at: new Date().toISOString(),
+        last_sync_error: null,
+      })
+      .eq("id", connectionId);
+    if (health.error) console.warn("[calendly-callback] health mirror skipped", health.error.message);
+
     if (CALENDLY_WEBHOOK_URL) {
       try {
         const sub = await createWebhookSubscription(accessToken, CALENDLY_WEBHOOK_URL, me.uri, me.organization);

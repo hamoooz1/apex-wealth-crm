@@ -243,6 +243,10 @@
   opacity: 0.7;
 }
 
+.evNoShow .evTitle {
+  opacity: 0.75;
+}
+
 .evMore {
   border: none;
   background: transparent;

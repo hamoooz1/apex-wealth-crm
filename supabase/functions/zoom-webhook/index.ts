@@ -1,5 +1,7 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { zoomTimestampFresh } from "../_shared/meetingStatus.ts";
+import { beginWebhookEvent, finishWebhookEvent, sha256Hex } from "../_shared/webhookEvents.ts";
 
 function json(data: unknown, init: ResponseInit = {}) {
   return new Response(JSON.stringify(data), {
@@ -81,12 +83,24 @@ async function resolveMeeting(
   let meetingRow: any = null;
 
   if (zoomMeetingId) {
-    const r = await supabaseAdmin
+    const withOrigin = await supabaseAdmin
       .from("meetings")
-      .select("id, advisor_id, client_id, lead_id, title, notes")
+      .select("id, advisor_id, client_id, lead_id, title, notes, status_origin")
       .eq("external_event_uri", `zoom:${zoomMeetingId}`)
       .maybeSingle();
-    meetingRow = r.data || null;
+    if (!withOrigin.error) {
+      meetingRow = withOrigin.data || null;
+    } else if (/status_origin/.test(withOrigin.error.message || "")) {
+      const plain = await supabaseAdmin
+        .from("meetings")
+        .select("id, advisor_id, client_id, lead_id, title, notes")
+        .eq("external_event_uri", `zoom:${zoomMeetingId}`)
+        .maybeSingle();
+      if (plain.error) throw plain.error;
+      meetingRow = plain.data || null;
+    } else {
+      throw withOrigin.error;
+    }
   }
 
   let advisorId: string | null = meetingRow?.advisor_id ?? null;
@@ -176,6 +190,43 @@ async function attachSummary(
   }
 }
 
+async function ensureRecapTask(
+  supabaseAdmin: ReturnType<typeof createClient>,
+  meetingRow: { id: string; title?: string | null; client_id: string },
+  advisorId: string,
+) {
+  const sourceRef = `zoom:recap:${meetingRow.id}`;
+  const due = new Date();
+  due.setDate(due.getDate() + 1);
+  const row: Record<string, unknown> = {
+    title: `Send recap for: ${meetingRow.title || "meeting"}`,
+    description: "Auto-created when the Zoom meeting ended.",
+    status: "todo",
+    priority: "medium",
+    due_date: due.toISOString().slice(0, 10),
+    assigned_to: advisorId,
+    client_id: meetingRow.client_id,
+    created_at: new Date().toISOString(),
+    source_ref: sourceRef,
+  };
+  const inserted = await supabaseAdmin.from("tasks").insert(row);
+  if (!inserted.error || inserted.error.code === "23505") return;
+  if (!/source_ref/.test(inserted.error.message || "")) throw inserted.error;
+
+  const existing = await supabaseAdmin
+    .from("tasks")
+    .select("id")
+    .eq("client_id", meetingRow.client_id)
+    .eq("title", row.title)
+    .eq("description", row.description)
+    .limit(1);
+  if (existing.error) throw existing.error;
+  if (existing.data && existing.data.length > 0) return;
+  const { source_ref: _source, ...rest } = row;
+  const retry = await supabaseAdmin.from("tasks").insert(rest);
+  if (retry.error) throw retry.error;
+}
+
 Deno.serve(async (req: Request) => {
   if (req.method !== "POST") return json({ error: "Method not allowed" }, { status: 405 });
 
@@ -203,6 +254,9 @@ Deno.serve(async (req: Request) => {
   }
 
   const ts = req.headers.get("x-zm-request-timestamp") || "";
+  if (!zoomTimestampFresh(ts, Math.floor(Date.now() / 1000))) {
+    return json({ error: "Stale webhook timestamp" }, { status: 401 });
+  }
   const sigHeader = req.headers.get("x-zm-signature") || "";
   const message = `v0:${ts}:${rawBody}`;
   const expected = `v0=${await hmacSha256Hex(ZOOM_WEBHOOK_SECRET_TOKEN, message)}`;
@@ -214,6 +268,14 @@ Deno.serve(async (req: Request) => {
     auth: { persistSession: false, autoRefreshToken: false },
   });
 
+  const eventKey = await sha256Hex(rawBody);
+  const claim = await beginWebhookEvent(supabaseAdmin, "zoom", eventKey, typeof event === "string" ? event : null);
+  if (claim === "duplicate") return json({ ok: true, duplicate: true });
+
+  const finish = (status: "processed" | "error", error?: string) =>
+    finishWebhookEvent(supabaseAdmin, "zoom", eventKey, { status, error });
+
+  try {
   const obj = body?.payload?.object ?? {};
   const zoomMeetingId = String(obj?.id ?? obj?.meeting_id ?? "");
   const hostId = obj?.host_id ?? obj?.meeting_host_id ?? null;
@@ -222,35 +284,46 @@ Deno.serve(async (req: Request) => {
 
   const { meetingRow, advisorId } = await resolveMeeting(supabaseAdmin, zoomMeetingId, hostId);
 
+  if (advisorId) {
+    const marked = await supabaseAdmin
+      .from("zoom_connections")
+      .update({ last_webhook_at: new Date().toISOString() })
+      .eq("user_id", advisorId)
+      .is("revoked_at", null);
+    if (marked.error && !/last_webhook_at/.test(marked.error.message || "")) {
+      console.warn("[zoom-webhook] last_webhook_at skipped", marked.error.message);
+    }
+  }
+
   if (event === "meeting.started") {
     if (meetingRow?.id) {
       await supabaseAdmin.from("meetings").update({ last_synced_at: new Date().toISOString() }).eq("id", meetingRow.id);
     }
+    await finish("processed");
     return json({ ok: true });
   }
 
   if (event === "meeting.ended") {
     if (meetingRow?.id) {
-      await supabaseAdmin
-        .from("meetings")
-        .update({ status: "completed", last_synced_at: new Date().toISOString() })
-        .eq("id", meetingRow.id);
+      const patch: Record<string, unknown> = { last_synced_at: new Date().toISOString() };
+      if (meetingRow.status_origin !== "advisor") {
+        patch.status = "completed";
+        patch.status_origin = "provider";
+      }
+      const updated = await supabaseAdmin.from("meetings").update(patch).eq("id", meetingRow.id);
+      if (updated.error && /status_origin/.test(updated.error.message || "")) {
+        const { status_origin: _origin, ...rest } = patch;
+        const retry = await supabaseAdmin.from("meetings").update(rest).eq("id", meetingRow.id);
+        if (retry.error) throw retry.error;
+      } else if (updated.error) {
+        throw updated.error;
+      }
 
       if (meetingRow.client_id && advisorId) {
-        const due = new Date();
-        due.setDate(due.getDate() + 1);
-        await supabaseAdmin.from("tasks").insert({
-          title: `Send recap for: ${meetingRow.title || "meeting"}`,
-          description: "Auto-created when the Zoom meeting ended.",
-          status: "todo",
-          priority: "medium",
-          due_date: due.toISOString().slice(0, 10),
-          assigned_to: advisorId,
-          client_id: meetingRow.client_id,
-          created_at: new Date().toISOString(),
-        });
+        await ensureRecapTask(supabaseAdmin, meetingRow, advisorId);
       }
     }
+    await finish("processed");
     return json({ ok: true });
   }
 
@@ -279,6 +352,7 @@ Deno.serve(async (req: Request) => {
       },
       { onConflict: "provider,external_meeting_id" },
     );
+    await finish("processed");
     return json({ ok: true });
   }
 
@@ -296,8 +370,15 @@ Deno.serve(async (req: Request) => {
     } else {
       console.log("[zoom-webhook] summary event without text or meeting id", event);
     }
+    await finish("processed");
     return json({ ok: true, had_summary: !!summaryText });
   }
 
+  await finish("processed");
   return json({ ok: true, ignored: event ?? null });
+  } catch (e) {
+    const message = (e as Error).message || "Webhook failed";
+    await finish("error", message);
+    return json({ error: message }, { status: 500 });
+  }
 });

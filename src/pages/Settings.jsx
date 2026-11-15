@@ -9,7 +9,15 @@ import {
   getMyPreferences,
   saveMyPreferences,
 } from '../lib/queries.js'
-import { getMyZoomConnection, startZoomConnect, disconnectZoom } from '../lib/zoom.js'
+import { startZoomConnect, disconnectZoom } from '../lib/zoom.js'
+import {
+  calendlyUpdateMode,
+  formatWhen,
+  loadMyCalendlyConnection,
+  loadMyZoomConnection,
+  loadTeamIntegrationHealth,
+  tokenHealth,
+} from '../lib/integrationHealth.js'
 import { syncCalendly } from '../lib/calendly.js'
 import { dispatchMyReminders } from '../lib/notifications.js'
 import { supabase } from '../lib/supabaseClient.js'
@@ -48,6 +56,19 @@ function Switch({ checked, onChange, disabled, labelledBy }) {
     >
       <span className="sSwitchThumb" />
     </button>
+  )
+}
+
+function HealthList({ rows }) {
+  return (
+    <dl className="integHealth">
+      {rows.map((row) => (
+        <div key={row.label}>
+          <dt>{row.label}</dt>
+          <dd className={row.tone ? `is-${row.tone}` : undefined}>{row.value}</dd>
+        </div>
+      ))}
+    </dl>
   )
 }
 
@@ -167,21 +188,16 @@ export default function Settings() {
     }
   }, [profile?.id])
 
+  const [teamHealth, setTeamHealth] = useState([])
+  const [teamHealthError, setTeamHealthError] = useState(null)
+
   // Section 4: Calendly
   const [calendlyConn, setCalendlyConn] = useState(null)
   const [calendlyLoading, setCalendlyLoading] = useState(false)
   const [calendlyError, setCalendlyError] = useState(null)
 
   async function loadCalendlyConnection(userId) {
-    if (!userId) return null
-    const { data, error } = await supabase
-      .from('calendly_connections')
-      .select('*')
-      .eq('user_id', userId)
-      .is('revoked_at', null)
-      .maybeSingle()
-    if (error) throw error
-    return data || null
+    return loadMyCalendlyConnection(userId)
   }
 
   useEffect(() => {
@@ -256,6 +272,8 @@ export default function Settings() {
       setCalendlySyncMsg(
         `Synced ${res?.events || 0} event${res?.events === 1 ? '' : 's'} · ${added} added, ${updated} updated.`,
       )
+      const row = await loadCalendlyConnection(profile?.id)
+      setCalendlyConn(row)
     } catch (e) {
       setCalendlyError(e)
     } finally {
@@ -279,7 +297,7 @@ export default function Settings() {
       setZoomLoading(true)
       setZoomError(null)
       try {
-        const row = await getMyZoomConnection(profile.id)
+        const row = await loadMyZoomConnection(profile.id)
         if (!mounted) return
         setZoomConn(row)
       } catch (e) {
@@ -295,6 +313,21 @@ export default function Settings() {
       mounted = false
     }
   }, [profile?.id])
+
+  useEffect(() => {
+    if (!isAdmin || activeTab !== 'integrations') return undefined
+    let mounted = true
+    loadTeamIntegrationHealth()
+      .then((rows) => {
+        if (mounted) setTeamHealth(rows)
+      })
+      .catch((e) => {
+        if (mounted) setTeamHealthError(e)
+      })
+    return () => {
+      mounted = false
+    }
+  }, [isAdmin, activeTab, calendlyConn, zoomConn])
 
   async function onConnectZoom() {
     setZoomError(null)
@@ -313,7 +346,7 @@ export default function Settings() {
     setZoomLoading(true)
     try {
       await disconnectZoom()
-      const row = await getMyZoomConnection(profile?.id)
+      const row = await loadMyZoomConnection(profile?.id)
       setZoomConn(row)
     } catch (e) {
       setZoomError(e)
@@ -860,14 +893,33 @@ export default function Settings() {
                       ? calendlyDisplay(calendlyConn.calendly_user_uri)
                       : 'Connect to pull your bookings into Apex.'}
                   </div>
+                  {calendlyConn ? (
+                    <HealthList
+                      rows={[
+                        {
+                          label: 'Token',
+                          value: tokenHealth(calendlyConn.token_status, calendlyConn.token_expires_at).label,
+                          tone: tokenHealth(calendlyConn.token_status, calendlyConn.token_expires_at).tone,
+                        },
+                        { label: 'Last synced', value: formatWhen(calendlyConn.last_synced_at) },
+                        { label: 'Updates', value: calendlyUpdateMode(calendlyConn) },
+                        ...(calendlyConn.last_webhook_at
+                          ? [{ label: 'Last webhook', value: formatWhen(calendlyConn.last_webhook_at) }]
+                          : []),
+                      ]}
+                    />
+                  ) : null}
                   {calendlyConn?.webhook_last_error ? (
                     <div className="inlineHint">
                       {/calendly account to standard|permission denied|upgrade/i.test(
                         calendlyConn.webhook_last_error,
                       )
-                        ? 'Connected. Automatic sync needs a paid Calendly plan — use Sync now on the free plan.'
-                        : `Connected, but automatic sync may be inactive.`}
+                        ? 'Webhooks need a paid Calendly plan. The 30-minute reconcile still imports bookings.'
+                        : 'Webhook setup did not finish. Bookings still reconcile every 30 minutes.'}
                     </div>
+                  ) : null}
+                  {calendlyConn?.last_sync_error ? (
+                    <div className="inlineError">{calendlyConn.last_sync_error}</div>
                   ) : null}
                   {calendlySyncMsg ? <div className="inlineHint">{calendlySyncMsg}</div> : null}
                   <div className="integActions">
@@ -922,6 +974,23 @@ export default function Settings() {
                   <div className="sHint">
                     {zoomConn?.email || zoomConn?.zoom_user_id || 'Connect to generate Zoom links from the CRM.'}
                   </div>
+                  {zoomConn ? (
+                    <HealthList
+                      rows={[
+                        {
+                          label: 'Token',
+                          value: tokenHealth(zoomConn.token_status, zoomConn.token_expires_at).label,
+                          tone: tokenHealth(zoomConn.token_status, zoomConn.token_expires_at).tone,
+                        },
+                        {
+                          label: 'Last token check',
+                          value: formatWhen(zoomConn.token_status_at || zoomConn.last_reconcile_at),
+                        },
+                        { label: 'Last webhook', value: formatWhen(zoomConn.last_webhook_at) },
+                      ]}
+                    />
+                  ) : null}
+                  {zoomConn?.last_sync_error ? <div className="inlineError">{zoomConn.last_sync_error}</div> : null}
                   <div className="integActions">
                     {zoomConn ? (
                       <button
@@ -940,6 +1009,56 @@ export default function Settings() {
                   </div>
                 </div>
               </div>
+
+              {isAdmin ? (
+                <div className="card settingsCard integrationsTeam">
+                  <div className="cardHeader">
+                    <div>
+                      <div className="cardTitle">Team integrations</div>
+                      <div className="muted">Token and last sync for each connected advisor</div>
+                    </div>
+                  </div>
+                  <div className="settingsBody">
+                    {teamHealthError ? (
+                      <div className="inlineError">{teamHealthError.message || 'Could not load team integrations.'}</div>
+                    ) : null}
+                    {teamHealth.length === 0 ? (
+                      <div className="sHint">No connected Calendly or Zoom accounts yet.</div>
+                    ) : (
+                      <div className="adminTableWrap">
+                        <table className="adminTable">
+                          <thead>
+                            <tr>
+                              <th>Advisor</th>
+                              <th>Calendly</th>
+                              <th>Last synced</th>
+                              <th>Zoom</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {teamHealth.map((row) => (
+                              <tr key={row.userId}>
+                                <td>{row.name}</td>
+                                <td>
+                                  {row.calendly
+                                    ? tokenHealth(row.calendly.token_status, row.calendly.token_expires_at).label
+                                    : 'Not connected'}
+                                </td>
+                                <td>{row.calendly ? formatWhen(row.calendly.last_synced_at) : '—'}</td>
+                                <td>
+                                  {row.zoom
+                                    ? tokenHealth(row.zoom.token_status, row.zoom.token_expires_at).label
+                                    : 'Not connected'}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ) : null}
             </div>
           ) : null}
 

@@ -10,6 +10,7 @@ const meetingStatusOptions = [
   { value: 'scheduled', label: 'Scheduled' },
   { value: 'completed', label: 'Completed' },
   { value: 'canceled', label: 'Canceled' },
+  { value: 'no_show', label: 'No-show' },
 ]
 
 function toLocalInputValue(iso) {

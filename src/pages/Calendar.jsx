@@ -375,7 +375,11 @@ export default function Calendar() {
                         <button
                           key={m.id}
                           type="button"
-                          className={[chipClass(m.source), m.status === 'canceled' ? 'evCanceled' : null]
+                          className={[
+                            chipClass(m.source),
+                            m.status === 'canceled' ? 'evCanceled' : null,
+                            m.status === 'no_show' ? 'evNoShow' : null,
+                          ]
                             .filter(Boolean)
                             .join(' ')}
                           title={`${m.title} · ${fmtTime(m.start_time)}`}

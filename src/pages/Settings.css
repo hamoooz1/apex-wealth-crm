@@ -447,6 +447,44 @@
   margin-top: 16px;
 }
 
+.integHealth {
+  display: grid;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.integHealth div {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: baseline;
+}
+
+.integHealth dt {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.integHealth dd {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+  text-align: right;
+}
+
+.integHealth dd.is-good {
+  color: #15803d;
+}
+
+.integHealth dd.is-bad {
+  color: #b91c1c;
+}
+
+.integrationsTeam {
+  grid-column: 1 / -1;
+}
+
 .adminTableWrap {
   overflow: auto;
   border: 1px solid var(--border);
