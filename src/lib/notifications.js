@@ -5,7 +5,7 @@ export async function getMyNotifications(userId, { limit = 30 } = {}) {
   if (!userId) return []
   const { data, error } = await supabase
     .from('notifications')
-    .select('*')
+    .select('id, kind, title, body, href, read_at, created_at')
     .eq('user_id', userId)
     .neq('kind', 'email.digest')
     .order('created_at', { ascending: false })

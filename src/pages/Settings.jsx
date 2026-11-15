@@ -3,9 +3,9 @@ import { CalendarDays, Camera, Eye, EyeOff, Plus, Save, Video } from 'lucide-rea
 import './Settings.css'
 import { useAuth } from '../contexts/AuthContext.jsx'
 import {
-  createProfileRow,
   fetchProfilesPageData,
   updateProfileById,
+  updateProfileAccess,
   getMyPreferences,
   saveMyPreferences,
 } from '../lib/queries.js'
@@ -60,7 +60,6 @@ function calendlyDisplay(uri) {
 export default function Settings() {
   const { profile, user, refreshProfile, profileLoading, profileError } = useAuth()
   const isAdmin = profile?.role === 'admin'
-  const isManager = profile?.role === 'manager'
   const canManageTeam = canManageTeamTab(profile)
   const [activeTab, setActiveTab] = useState('profile')
 
@@ -419,40 +418,36 @@ export default function Settings() {
     setTeamError(null)
     setTeam((prev) => prev.map((p) => (p.id === id ? { ...p, ...patch } : p)))
     try {
-      await updateProfileById(id, patch)
+      const access = {}
+      const safe = {}
+      if ('role' in patch) access.role = patch.role
+      if ('manager_id' in patch) access.manager_id = patch.manager_id
+      if ('is_active' in patch) access.is_active = patch.is_active
+      for (const [key, value] of Object.entries(patch)) {
+        if (key === 'role' || key === 'manager_id' || key === 'is_active') continue
+        safe[key] = value
+      }
+      if (Object.keys(access).length) await updateProfileAccess(id, access)
+      if (Object.keys(safe).length) await updateProfileById(id, safe)
     } catch (e) {
       setTeamError(e)
     }
-  }
-
-  async function ensureProfileRowExists() {
-    if (profile) return profile
-    if (!user?.id) return null
-    const payload = {
-      id: user.id,
-      full_name: user.user_metadata?.full_name || user.email?.split('@')?.[0] || 'New User',
-      email: user.email,
-      role: 'advisor',
-      manager_id: null,
-      is_active: true,
-    }
-    const created = await createProfileRow(payload)
-    await refreshProfile()
-    return created
   }
 
   async function onSaveProfile() {
     setProfileSaveError(null)
     setSavingProfile(true)
     try {
-      const p = await ensureProfileRowExists()
-      const id = p?.id || profile?.id
-      if (!id) throw new Error('No profile row found for current user.')
+      const id = profile?.id
+      if (!id) throw new Error('No profile row found for this account. Ask an admin to send a new invite.')
 
-      const patch = { full_name: myProfile.full_name, avatar_url: myProfile.avatar_url || null }
-      if (isAdmin) patch.is_active = !!myProfile.is_active
-
-      await updateProfileById(id, patch)
+      await updateProfileById(id, {
+        full_name: myProfile.full_name,
+        avatar_url: myProfile.avatar_url || null,
+      })
+      if (isAdmin && myProfile.is_active !== savedProfile.is_active) {
+        await updateProfileAccess(id, { is_active: !!myProfile.is_active })
+      }
       await refreshProfile()
       setSavedProfile(myProfile)
     } catch (e) {
@@ -467,9 +462,13 @@ export default function Settings() {
     setProfileSaveError(null)
     setSavingProfile(true)
     try {
-      const p = await ensureProfileRowExists()
-      const id = p?.id || profile?.id
-      if (!id) throw new Error('No profile row found for current user.')
+      const id = profile?.id
+      if (!id) throw new Error('No profile row found for this account. Ask an admin to send a new invite.')
+      if (file.size > 2 * 1024 * 1024) throw new Error('Avatar must be 2 MB or smaller.')
+      const allowed = ['image/jpeg', 'image/png', 'image/webp', 'image/gif']
+      if (file.type && !allowed.includes(file.type)) {
+        throw new Error('Avatar must be a JPEG, PNG, WEBP, or GIF.')
+      }
 
       const ext = file.name.split('.').pop() || 'png'
       const path = `${id}/avatar.${ext}`

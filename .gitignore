@@ -12,6 +12,11 @@ dist
 dist-ssr
 *.local
 
+# Local secrets. The anon key is public by design, but keep it out of git.
+.env
+.env.*
+!.env.example
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

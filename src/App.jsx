@@ -16,10 +16,28 @@ import Calendar from './pages/Calendar.jsx'
 import Auth from './pages/Auth.jsx'
 import ResetPassword from './pages/ResetPassword.jsx'
 import { AuthProvider, useAuth } from './contexts/AuthContext.jsx'
+import { APP_ROLES, rolesForPath } from './lib/access.js'
 import { useEffect, useState } from 'react'
 
+function BlockedScreen({ title, subtitle }) {
+  const { signOut } = useAuth()
+  return (
+    <div className="authWrap">
+      <div className="authCard" style={{ textAlign: 'left' }}>
+        <h1 className="authTitle" style={{ marginTop: 0 }}>
+          {title}
+        </h1>
+        <div className="authSubtitle">{subtitle}</div>
+        <button className="btnPrimary" type="button" onClick={() => signOut()} style={{ marginTop: 16 }}>
+          Sign out
+        </button>
+      </div>
+    </div>
+  )
+}
+
 function AuthGate({ children }) {
-  const { loading, session, passwordRecovery } = useAuth()
+  const { loading, session, passwordRecovery, profile, profileLoading, profileError } = useAuth()
   const [transitioning, setTransitioning] = useState(false)
 
   useEffect(() => {
@@ -45,12 +63,64 @@ function AuthGate({ children }) {
   }
   if (!session) return <Auth />
   if (passwordRecovery) return <ResetPassword />
+  if (profileLoading || !profile) {
+    if (profileError) {
+      return (
+        <BlockedScreen
+          title="Could not load your profile"
+          subtitle={profileError.message || 'Check your connection and try again.'}
+        />
+      )
+    }
+    if (!profileLoading && !profile) {
+      return (
+        <BlockedScreen
+          title="No profile for this account"
+          subtitle="Ask an admin to invite you again. Profiles are created on the server, not in the browser."
+        />
+      )
+    }
+    return (
+      <div className="authWrap">
+        <div className="authCard" style={{ textAlign: 'left' }}>
+          <div className="authTitle" style={{ marginTop: 0 }}>
+            Loading…
+          </div>
+          <div className="authSubtitle">Checking your access</div>
+        </div>
+      </div>
+    )
+  }
+  if (profile.is_active === false) {
+    return (
+      <BlockedScreen
+        title="Account deactivated"
+        subtitle="An admin has turned off access for this account. Ask them to reactivate you."
+      />
+    )
+  }
+  if (!APP_ROLES.includes(profile.role)) {
+    return (
+      <BlockedScreen
+        title="Access not available"
+        subtitle="This account does not have a CRM role. Ask an admin to assign admin, manager, or advisor."
+      />
+    )
+  }
   return (
     <>
       {transitioning ? <div className="loginTransition" aria-hidden="true" /> : null}
       {children}
     </>
   )
+}
+
+function RoleRoute({ path, children }) {
+  const { profile } = useAuth()
+  if (!rolesForPath(path).includes(profile?.role)) {
+    return <Navigate to="/dashboard" replace />
+  }
+  return children
 }
 
 function App() {
@@ -71,16 +141,16 @@ function App() {
               <div className="appContent">
                 <Routes>
                   <Route path="/" element={<Navigate to="/dashboard" replace />} />
-                  <Route path="/dashboard" element={<Dashboard />} />
-                  <Route path="/reports" element={<Reports />} />
-                  <Route path="/leads" element={<Leads />} />
-                  <Route path="/tasks" element={<Tasks />} />
-                  <Route path="/pipeline" element={<Pipeline />} />
-                  <Route path="/clients" element={<Clients />} />
-                  <Route path="/clients/:id" element={<ClientDetail />} />
-                  <Route path="/calendar" element={<Calendar />} />
-                  <Route path="/team" element={<Team />} />
-                  <Route path="/settings" element={<Settings />} />
+                  <Route path="/dashboard" element={<RoleRoute path="/dashboard"><Dashboard /></RoleRoute>} />
+                  <Route path="/reports" element={<RoleRoute path="/reports"><Reports /></RoleRoute>} />
+                  <Route path="/leads" element={<RoleRoute path="/leads"><Leads /></RoleRoute>} />
+                  <Route path="/tasks" element={<RoleRoute path="/tasks"><Tasks /></RoleRoute>} />
+                  <Route path="/pipeline" element={<RoleRoute path="/pipeline"><Pipeline /></RoleRoute>} />
+                  <Route path="/clients" element={<RoleRoute path="/clients"><Clients /></RoleRoute>} />
+                  <Route path="/clients/:id" element={<RoleRoute path="/clients"><ClientDetail /></RoleRoute>} />
+                  <Route path="/calendar" element={<RoleRoute path="/calendar"><Calendar /></RoleRoute>} />
+                  <Route path="/team" element={<RoleRoute path="/team"><Team /></RoleRoute>} />
+                  <Route path="/settings" element={<RoleRoute path="/settings"><Settings /></RoleRoute>} />
                   <Route path="*" element={<Navigate to="/dashboard" replace />} />
                 </Routes>
               </div>

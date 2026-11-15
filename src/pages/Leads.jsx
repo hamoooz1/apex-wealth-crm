@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Plus, Search, Save, X } from 'lucide-react'
 
-import { fetchProfilesPageData } from '../lib/queries.js'
+import { fetchProfilesPageData, LEAD_COLUMNS } from '../lib/queries.js'
 import { supabase } from '../lib/supabaseClient.js'
 import { useAuth } from '../contexts/AuthContext.jsx'
 import { confettiBurst } from '../lib/confetti.js'
@@ -122,7 +122,7 @@ export default function Leads() {
       try {
         const [profilesRows, leadsRes] = await Promise.all([
           fetchProfilesPageData(),
-          supabase.from('leads').select('*').order('created_at', { ascending: false }),
+          supabase.from('leads').select(LEAD_COLUMNS).order('created_at', { ascending: false }),
         ])
         if (leadsRes.error) throw leadsRes.error
         if (!mounted) return

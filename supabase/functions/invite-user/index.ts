@@ -47,12 +47,16 @@ Deno.serve(async (req) => {
 
     const { data: callerProfile, error: profErr } = await adminClient
       .from("profiles")
-      .select("id, role")
+      .select("id, role, is_active")
       .eq("id", callerId)
       .maybeSingle();
 
     if (profErr || !callerProfile) {
       return json({ error: "Caller profile missing" }, 403);
+    }
+
+    if (callerProfile.is_active === false) {
+      return json({ error: "Your account is inactive" }, 403);
     }
 
     const callerRole = callerProfile.role;
@@ -97,10 +101,11 @@ Deno.serve(async (req) => {
       }
     }
 
+    // full_name is display data. Role and manager are never put in user
+    // metadata, which the invited person can edit. handle_new_user ignores
+    // those keys; syncProfile writes them with the service role.
     const userMeta = {
       full_name: full_name || "",
-      role: inviteRole,
-      manager_id: managerId,
     };
     const redirectTo = authRedirectTo(appUrl);
 
@@ -116,6 +121,19 @@ Deno.serve(async (req) => {
         })
         .eq("id", userId);
       if (updateErr) throw updateErr;
+
+      const { error: metaErr } = await adminClient.auth.admin.updateUserById(userId, {
+        app_metadata: {
+          role: inviteRole,
+          manager_id: managerId,
+        },
+        user_metadata: {
+          full_name: full_name?.trim() || "",
+          role: null,
+          manager_id: null,
+        },
+      });
+      if (metaErr) throw metaErr;
     }
 
     const { data: invited, error: inviteErr } = await adminClient.auth.admin.inviteUserByEmail(

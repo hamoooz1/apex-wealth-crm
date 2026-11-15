@@ -1,9 +1,28 @@
 import { supabase } from './supabaseClient.js'
 
 const PROFILE_MIN = 'id, full_name, email, role, avatar_url'
+const PROFILE_LIST = `${PROFILE_MIN}, manager_id, is_active, created_at`
+
+export const LEAD_COLUMNS =
+  'id, first_name, last_name, email, phone, source, status, assigned_to, notes, created_at, updated_at'
+export const CLIENT_COLUMNS =
+  'id, lead_id, first_name, last_name, email, phone, advisor_id, aum, status, next_review_date, created_at'
+export const TASK_COLUMNS =
+  'id, title, description, status, priority, due_date, assigned_to, client_id, lead_id, created_at'
+export const MEETING_COLUMNS =
+  'id, title, start_time, end_time, status, advisor_id, client_id, lead_id, source, notes, meeting_type, meeting_url, external_provider, external_event_uri, location'
+export const PIPELINE_ENTRY_COLUMNS =
+  'id, lead_id, stage_id, assigned_to, value, probability, entered_at, updated_at'
+export const STAGE_COLUMNS = 'id, name, sort_order, is_active'
+const ACTIVITY_COLUMNS = 'id, action, details, created_at, actor_id, client_id, lead_id'
+const NOTE_COLUMNS = 'id, client_id, author_id, kind, body, created_at'
+const DOCUMENT_COLUMNS =
+  'id, client_id, uploaded_by, file_name, storage_path, mime_type, file_size, created_at'
+const RECORDING_COLUMNS =
+  'id, meeting_id, client_id, topic, recording_start, created_at, duration_minutes, play_url, transcript_url, summary'
 
 export async function getProfilesMap() {
-  const { data, error } = await supabase.from('profiles').select('*')
+  const { data, error } = await supabase.from('profiles').select(PROFILE_LIST)
   if (error) throw error
   const map = new Map()
   for (const p of data || []) map.set(p.id, p)
@@ -11,7 +30,7 @@ export async function getProfilesMap() {
 }
 
 export async function getLeadsMap() {
-  const { data, error } = await supabase.from('leads').select('*')
+  const { data, error } = await supabase.from('leads').select(LEAD_COLUMNS)
   if (error) throw error
   const map = new Map()
   for (const l of data || []) map.set(l.id, l)
@@ -32,7 +51,11 @@ export async function fetchDashboardData() {
     supabase.from('leads').select('id, first_name, last_name, status, created_at, updated_at'),
     supabase.from('clients').select('id, first_name, last_name, status, aum, next_review_date, advisor_id'),
     supabase.from('tasks').select('id, title, status, due_date, assigned_to, client_id, lead_id'),
-    supabase.from('meetings').select('id, title, start_time, status, advisor_id, client_id'),
+    supabase
+      .from('meetings')
+      .select('id, title, start_time, status, advisor_id, client_id')
+      .gte('start_time', new Date().toISOString())
+      .lte('start_time', new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString()),
     supabase.from('pipeline_entries').select('id, stage_id, value, lead_id'),
     supabase.from('pipeline_stages').select('id, name, sort_order, is_active').order('sort_order', { ascending: true }),
     supabase.from('activity_logs').select('id, action, details, created_at, actor_id, client_id, lead_id').order('created_at', { ascending: false }).limit(12),
@@ -65,9 +88,9 @@ export async function fetchDashboardData() {
 
 export async function fetchTasksPageData() {
   const [tasksRes, leadsRes, clientsRes] = await Promise.all([
-    supabase.from('tasks').select('*').order('created_at', { ascending: false }),
-    supabase.from('leads').select('*'),
-    supabase.from('clients').select('*'),
+    supabase.from('tasks').select(TASK_COLUMNS).order('created_at', { ascending: false }),
+    supabase.from('leads').select('id, first_name, last_name, email'),
+    supabase.from('clients').select('id, first_name, last_name, email'),
   ])
   const err = tasksRes.error || leadsRes.error || clientsRes.error
   if (err) throw err
@@ -76,10 +99,10 @@ export async function fetchTasksPageData() {
 
 export async function fetchPipelinePageData() {
   const [stagesRes, entriesRes, leadsRes, profilesRes] = await Promise.all([
-    supabase.from('pipeline_stages').select('*').order('sort_order', { ascending: true }),
-    supabase.from('pipeline_entries').select('*').order('updated_at', { ascending: false }),
-    supabase.from('leads').select('*'),
-    supabase.from('profiles').select('*'),
+    supabase.from('pipeline_stages').select(STAGE_COLUMNS).order('sort_order', { ascending: true }),
+    supabase.from('pipeline_entries').select(PIPELINE_ENTRY_COLUMNS).order('updated_at', { ascending: false }),
+    supabase.from('leads').select('id, first_name, last_name, email'),
+    supabase.from('profiles').select(PROFILE_MIN),
   ])
   const err = stagesRes.error || entriesRes.error || leadsRes.error || profilesRes.error
   if (err) throw err
@@ -93,12 +116,12 @@ export async function fetchPipelinePageData() {
 
 export async function fetchReportsPageData() {
   const [clientsRes, leadsRes, tasksRes, entriesRes, stagesRes, profilesRes] = await Promise.all([
-    supabase.from('clients').select('*'),
-    supabase.from('leads').select('*'),
-    supabase.from('tasks').select('*'),
-    supabase.from('pipeline_entries').select('*'),
-    supabase.from('pipeline_stages').select('*').order('sort_order', { ascending: true }),
-    supabase.from('profiles').select('*'),
+    supabase.from('clients').select('id, first_name, last_name, status, aum, advisor_id, next_review_date'),
+    supabase.from('leads').select('id, first_name, last_name, status, assigned_to, created_at, updated_at'),
+    supabase.from('tasks').select('id, status, due_date, assigned_to'),
+    supabase.from('pipeline_entries').select('id, stage_id, value, assigned_to'),
+    supabase.from('pipeline_stages').select(STAGE_COLUMNS).order('sort_order', { ascending: true }),
+    supabase.from('profiles').select(PROFILE_MIN),
   ])
   const err =
     clientsRes.error ||
@@ -120,7 +143,7 @@ export async function fetchReportsPageData() {
 
 export async function fetchClientsPageData() {
   const [clientsRes, profilesRes, recordingsRes] = await Promise.all([
-    supabase.from('clients').select('*').order('created_at', { ascending: false }),
+    supabase.from('clients').select(CLIENT_COLUMNS).order('created_at', { ascending: false }),
     supabase.from('profiles').select(PROFILE_MIN),
     supabase.from('meeting_recordings').select('client_id'),
   ])
@@ -142,34 +165,34 @@ export async function fetchClientsPageData() {
 export async function fetchClientDetail(clientId) {
   const [clientRes, profilesRes, meetingsRes, tasksRes, recordingsRes, activityRes, notesRes, documentsRes] =
     await Promise.all([
-    supabase.from('clients').select('*').eq('id', clientId).maybeSingle(),
+    supabase.from('clients').select(CLIENT_COLUMNS).eq('id', clientId).maybeSingle(),
     supabase.from('profiles').select(PROFILE_MIN),
-    supabase.from('meetings').select('*').eq('client_id', clientId).order('start_time', { ascending: false }),
+    supabase.from('meetings').select(MEETING_COLUMNS).eq('client_id', clientId).order('start_time', { ascending: false }),
     supabase
       .from('tasks')
-      .select('*')
+      .select(TASK_COLUMNS)
       .eq('client_id', clientId)
       .order('due_date', { ascending: true, nullsFirst: false }),
     supabase
       .from('meeting_recordings')
-      .select('*')
+      .select(RECORDING_COLUMNS)
       .eq('client_id', clientId)
       .order('recording_start', { ascending: false, nullsFirst: false })
       .order('created_at', { ascending: false }),
     supabase
       .from('activity_logs')
-      .select('*')
+      .select(ACTIVITY_COLUMNS)
       .eq('client_id', clientId)
       .order('created_at', { ascending: false })
       .limit(100),
     supabase
       .from('client_notes')
-      .select('*')
+      .select(NOTE_COLUMNS)
       .eq('client_id', clientId)
       .order('created_at', { ascending: false }),
     supabase
       .from('client_documents')
-      .select('*')
+      .select(DOCUMENT_COLUMNS)
       .eq('client_id', clientId)
       .order('created_at', { ascending: false }),
   ])
@@ -199,7 +222,7 @@ export async function addClientNote({ clientId, authorId, kind, body }) {
   const { data, error } = await supabase
     .from('client_notes')
     .insert({ client_id: clientId, author_id: authorId, kind: kind || 'note', body })
-    .select('*')
+    .select(NOTE_COLUMNS)
     .maybeSingle()
   if (error) throw error
   return data
@@ -214,19 +237,29 @@ export async function deleteClientNote(noteId) {
 export async function fetchProfilesPageData() {
   const { data, error } = await supabase
     .from('profiles')
-    .select(`${PROFILE_MIN}, manager_id, is_active, created_at`)
+    .select(PROFILE_LIST)
     .order('created_at', { ascending: false })
   if (error) throw error
   return data || []
 }
 
 export async function fetchTeamProfilesPageData() {
+  const monthStart = new Date()
+  monthStart.setDate(1)
+  monthStart.setHours(0, 0, 0, 0)
+  const monthEnd = new Date(monthStart)
+  monthEnd.setMonth(monthEnd.getMonth() + 1)
+
   const [profilesRes, clientsRes, meetingsRes, entriesRes, stagesRes] = await Promise.all([
-    supabase.from('profiles').select('*').order('created_at', { ascending: false }),
-    supabase.from('clients').select('*'),
-    supabase.from('meetings').select('*'),
-    supabase.from('pipeline_entries').select('*'),
-    supabase.from('pipeline_stages').select('*').order('sort_order', { ascending: true }),
+    supabase.from('profiles').select(PROFILE_LIST).order('created_at', { ascending: false }),
+    supabase.from('clients').select('id, advisor_id, aum'),
+    supabase
+      .from('meetings')
+      .select('id, advisor_id, start_time')
+      .gte('start_time', monthStart.toISOString())
+      .lt('start_time', monthEnd.toISOString()),
+    supabase.from('pipeline_entries').select('id, stage_id, assigned_to, value'),
+    supabase.from('pipeline_stages').select(STAGE_COLUMNS).order('sort_order', { ascending: true }),
   ])
 
   const err =
@@ -260,7 +293,7 @@ export async function fetchCalendarPageData() {
 export async function fetchMeetings({ from, to, advisorId = null } = {}) {
   let q = supabase
     .from('meetings')
-    .select('*')
+    .select(MEETING_COLUMNS)
     .order('start_time', { ascending: true })
 
   if (from) q = q.gte('start_time', from)
@@ -299,7 +332,7 @@ export async function getMeetingRecordings(meetingId) {
   if (!meetingId) return []
   const { data, error } = await supabase
     .from('meeting_recordings')
-    .select('*')
+    .select(RECORDING_COLUMNS)
     .eq('meeting_id', meetingId)
     .order('created_at', { ascending: false })
   if (error) throw error
@@ -310,7 +343,7 @@ export async function getClientRecordings(clientId) {
   if (!clientId) return []
   const { data, error } = await supabase
     .from('meeting_recordings')
-    .select('*')
+    .select(RECORDING_COLUMNS)
     .eq('client_id', clientId)
     .order('recording_start', { ascending: false, nullsFirst: false })
     .order('created_at', { ascending: false })
@@ -329,12 +362,16 @@ export async function updateProfileById(profileId, patch) {
   return data || null
 }
 
-export async function createProfileRow(payload) {
-  const { data, error } = await supabase
-    .from('profiles')
-    .insert(payload)
-    .select('*')
-    .maybeSingle()
+export async function updateProfileAccess(profileId, patch) {
+  const { data, error } = await supabase.rpc('update_profile_access', {
+    target_id: profileId,
+    new_role: patch.role ?? null,
+    new_manager_id: Object.prototype.hasOwnProperty.call(patch, 'manager_id') ? patch.manager_id : null,
+    new_is_active: Object.prototype.hasOwnProperty.call(patch, 'is_active') ? patch.is_active : null,
+    set_role: Object.prototype.hasOwnProperty.call(patch, 'role'),
+    set_manager: Object.prototype.hasOwnProperty.call(patch, 'manager_id'),
+    set_active: Object.prototype.hasOwnProperty.call(patch, 'is_active'),
+  })
   if (error) throw error
   return data || null
 }
