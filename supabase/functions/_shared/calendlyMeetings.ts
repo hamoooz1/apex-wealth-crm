@@ -9,6 +9,7 @@ import {
   type MeetingSnap,
 } from "./meetingStatus.ts";
 import { ensureCalendlyAccessToken, markConnectionSynced } from "./providerTokens.ts";
+import { zoomFieldsFromLocation } from "./zoomMeetings.ts";
 
 type Admin = ReturnType<typeof createClient>;
 
@@ -150,6 +151,18 @@ async function findInvitee(admin: Admin, uri: string | null): Promise<Found | nu
   return { snap: row.data as MeetingSnap, via: "alias" };
 }
 
+async function rememberZoomId(admin: Admin, meetingId: string, zoomMeetingId: string) {
+  const { error } = await admin.from("meeting_external_aliases").insert({
+    meeting_id: meetingId,
+    provider: "zoom",
+    kind: "zoom_meeting",
+    external_id: zoomMeetingId,
+  });
+  if (error && error.code !== "23505" && !/meeting_external_aliases|schema cache|relation|does not exist/i.test(error.message || "")) {
+    console.warn("[calendly] zoom alias skipped", error.message);
+  }
+}
+
 async function rememberAlias(admin: Admin, meetingId: string, inviteeUri: string) {
   const { error } = await admin.from("meeting_external_aliases").upsert(
     {
@@ -286,6 +299,10 @@ export async function applyCalendlyInvitee(
     rescheduled_from_invitee_uri: plan.action === "update" && plan.reschedule ? plan.aliasInviteeUri : undefined,
   });
 
+  const zoom = zoomFieldsFromLocation(input.location, incoming.meeting_url);
+  if (zoom.zoomMeetingId) incoming.zoom_meeting_id = zoom.zoomMeetingId;
+  if (zoom.uuid) incoming.zoom_meeting_uuid = zoom.uuid;
+
   const owned = plan.action === "update" ? await loadOwnership(admin, plan.id) : null;
   const patch = mergeProviderFields({
     existingOrigins: owned?.field_origins,
@@ -294,12 +311,9 @@ export async function applyCalendlyInvitee(
     release: plan.action === "update" && plan.reschedule ? RESCHEDULE_RELEASE_FIELDS : [],
   });
 
-  if (plan.action === "insert") {
-    await writeMeeting(admin, null, patch);
-    return "inserted";
-  }
-  await writeMeeting(admin, plan.id, patch);
-  return "updated";
+  const meetingId = plan.action === "insert" ? await writeMeeting(admin, null, patch) : await writeMeeting(admin, plan.id, patch);
+  if (zoom.zoomMeetingId && meetingId) await rememberZoomId(admin, meetingId, zoom.zoomMeetingId);
+  return plan.action === "insert" ? "inserted" : "updated";
 }
 
 type PageJson = { collection?: unknown[]; pagination?: { next_page?: string | null } };

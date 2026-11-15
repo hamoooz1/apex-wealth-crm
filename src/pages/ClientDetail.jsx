@@ -555,6 +555,7 @@ export default function ClientDetail() {
                 <li key={m.id} className="cdListItem">
                   <div className="cdItemMain">{m.title || 'Meeting'}</div>
                   <div className="cdItemMeta">{formatDateTime(m.start_time)}</div>
+                  {m.provider_summary ? <div className="cdItemMeta">{m.provider_summary.slice(0, 180)}</div> : null}
                 </li>
               ))}
             </ul>
@@ -578,6 +579,7 @@ export default function ClientDetail() {
                     {formatDateTime(m.start_time)}
                     {m.status ? <span className="cdItemStatus"> · {m.status}</span> : null}
                   </div>
+                  {m.provider_summary ? <div className="cdItemMeta">{m.provider_summary.slice(0, 180)}</div> : null}
                 </li>
               ))}
             </ul>

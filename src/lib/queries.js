@@ -10,7 +10,7 @@ export const CLIENT_COLUMNS =
 export const TASK_COLUMNS =
   'id, title, description, status, priority, due_date, assigned_to, client_id, lead_id, created_at'
 export const MEETING_COLUMNS =
-  'id, title, start_time, end_time, status, status_origin, advisor_id, client_id, lead_id, source, notes, meeting_type, meeting_url, external_provider, external_event_uri, external_invitee_uri, location, field_origins, provider_snapshot'
+  'id, title, start_time, end_time, status, status_origin, advisor_id, client_id, lead_id, source, notes, meeting_type, meeting_url, external_provider, external_event_uri, external_invitee_uri, location, field_origins, provider_snapshot, zoom_meeting_id, zoom_meeting_uuid, provider_summary'
 export const PIPELINE_ENTRY_COLUMNS =
   'id, lead_id, stage_id, assigned_to, value, probability, entered_at, updated_at'
 export const STAGE_COLUMNS = 'id, name, sort_order, is_active'
@@ -19,7 +19,7 @@ const NOTE_COLUMNS = 'id, client_id, author_id, kind, body, created_at'
 const DOCUMENT_COLUMNS =
   'id, client_id, uploaded_by, file_name, storage_path, mime_type, file_size, created_at'
 const RECORDING_COLUMNS =
-  'id, meeting_id, client_id, topic, recording_start, created_at, duration_minutes, play_url, transcript_url, summary'
+  'id, meeting_id, client_id, lead_id, topic, recording_start, created_at, duration_minutes, play_url, share_url, transcript_text, summary, storage_path, transcript_storage_path, storage_error, recording_passcode, external_meeting_id'
 
 export async function getProfilesMap() {
   const { data, error } = await supabase.from('profiles').select(PROFILE_LIST)
@@ -206,12 +206,13 @@ export async function fetchClientDetail(clientId) {
     notesRes.error ||
     documentsRes.error
   if (err) throw err
+  const recordings = await recordingsForMeetings(meetingsRes.data || [], recordingsRes.data || [])
   return {
     client: clientRes.data || null,
     profiles: profilesRes.data || [],
     meetings: meetingsRes.data || [],
     tasks: tasksRes.data || [],
-    recordings: recordingsRes.data || [],
+    recordings,
     activity: activityRes.data || [],
     notes: notesRes.data || [],
     documents: documentsRes.data || [],
@@ -328,13 +329,38 @@ export async function deleteMeetingById(meetingId) {
   return true
 }
 
-export async function getMeetingRecordings(meetingId) {
-  if (!meetingId) return []
+async function recordingsForMeetings(meetings, already) {
+  const meetingIds = meetings.map((m) => m.id).filter(Boolean)
+  const zoomIds = [...new Set(meetings.map((m) => m.zoom_meeting_id).filter(Boolean))]
+  if (!meetingIds.length && !zoomIds.length) return already
+  const filters = []
+  if (meetingIds.length) filters.push(`meeting_id.in.(${meetingIds.join(',')})`)
+  if (zoomIds.length) filters.push(`external_meeting_id.in.(${zoomIds.join(',')})`)
+  const { data, error } = await supabase.from('meeting_recordings').select(RECORDING_COLUMNS).or(filters.join(','))
+  if (error) throw error
+  const byId = new Map((already || []).map((row) => [row.id, row]))
+  for (const row of data || []) byId.set(row.id, row)
+  return [...byId.values()]
+}
+
+export async function getMeetingRecordings(meetingId, zoomMeetingId = null) {
+  if (!meetingId && !zoomMeetingId) return []
+  let q = supabase.from('meeting_recordings').select(RECORDING_COLUMNS).order('created_at', { ascending: false })
+  if (meetingId && zoomMeetingId) q = q.or(`meeting_id.eq.${meetingId},external_meeting_id.eq.${zoomMeetingId}`)
+  else if (zoomMeetingId) q = q.eq('external_meeting_id', zoomMeetingId)
+  else q = q.eq('meeting_id', meetingId)
+  const { data, error } = await q
+  if (error) throw error
+  return data || []
+}
+
+export async function getLeadMeetings(leadId) {
+  if (!leadId) return []
   const { data, error } = await supabase
-    .from('meeting_recordings')
-    .select(RECORDING_COLUMNS)
-    .eq('meeting_id', meetingId)
-    .order('created_at', { ascending: false })
+    .from('meetings')
+    .select(MEETING_COLUMNS)
+    .eq('lead_id', leadId)
+    .order('start_time', { ascending: false })
   if (error) throw error
   return data || []
 }

@@ -36,16 +36,27 @@ export async function loadMyCalendlyConnection(userId) {
 export async function loadMyZoomConnection(userId) {
   if (!userId) return null
   const rows = await selectRows('zoom_connections', ZOOM_HEALTH, ZOOM_BASE, (q) =>
-    q.eq('user_id', userId).is('revoked_at', null).limit(1),
+    q.eq('user_id', userId).order('revoked_at', { ascending: true, nullsFirst: true }).limit(1),
   )
   return rows[0] || null
 }
 
+function preferActive(rows) {
+  const byUser = new Map()
+  for (const row of rows) {
+    const prev = byUser.get(row.user_id)
+    if (!prev || (prev.revoked_at && !row.revoked_at)) byUser.set(row.user_id, row)
+  }
+  return [...byUser.values()]
+}
+
 export async function loadTeamIntegrationHealth() {
-  const [calendly, zoom] = await Promise.all([
+  const [calendlyRows, zoomRows] = await Promise.all([
     selectRows('calendly_connections', CALENDLY_HEALTH, CALENDLY_BASE, (q) => q.is('revoked_at', null)),
-    selectRows('zoom_connections', ZOOM_HEALTH, ZOOM_BASE, (q) => q.is('revoked_at', null)),
+    selectRows('zoom_connections', ZOOM_HEALTH, ZOOM_BASE, (q) => q),
   ])
+  const calendly = preferActive(calendlyRows)
+  const zoom = preferActive(zoomRows)
   const ids = [...new Set([...calendly, ...zoom].map((row) => row.user_id).filter(Boolean))]
   let profiles = []
   if (ids.length) {
@@ -79,7 +90,19 @@ export function tokenHealth(status, expiresAt) {
   if (status === 'expired') return { label: 'Expired', tone: 'bad' }
   if (status === 'refresh_failed') return { label: 'Refresh failed', tone: 'bad' }
   if (status === 'missing') return { label: 'Missing · reconnect', tone: 'bad' }
+  if (status === 'revoked') return { label: 'Reconnect needed', tone: 'bad' }
   return { label: 'Not checked yet', tone: 'muted' }
+}
+
+/** connected, reconnect, or disconnected. A revoked Zoom app stays visible. */
+export function zoomConnectionState(conn) {
+  if (!conn) return { state: 'disconnected', label: 'Not connected' }
+  const needsReconnect =
+    Boolean(conn.revoked_at) ||
+    conn.status === 'deauthorized' ||
+    ['revoked', 'missing', 'expired', 'refresh_failed'].includes(conn.token_status)
+  if (needsReconnect) return { state: 'reconnect', label: 'Reconnect needed' }
+  return { state: 'connected', label: 'Connected' }
 }
 
 export function calendlyUpdateMode(conn) {

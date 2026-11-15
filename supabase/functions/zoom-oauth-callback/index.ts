@@ -158,14 +158,17 @@ Deno.serve(async (req: Request) => {
 
   await supabaseAdmin.from("zoom_oauth_states").delete().eq("user_id", payload.uid);
 
-  const { data: existing } = await supabaseAdmin
+  const { data: existingRows } = await supabaseAdmin
     .from("zoom_connections")
-    .select("id")
+    .select("id, revoked_at, connected_at")
     .eq("user_id", payload.uid)
-    .is("revoked_at", null)
-    .maybeSingle();
+    .order("connected_at", { ascending: false });
 
-  let connectionId: string | undefined = existing?.id;
+  const rows = (existingRows || []) as { id: string; revoked_at: string | null }[];
+  const active = rows.find((row) => !row.revoked_at);
+  const revive = active || rows[0];
+
+  let connectionId: string | undefined = revive?.id;
   if (connectionId) {
     await supabaseAdmin
       .from("zoom_connections")
@@ -177,6 +180,8 @@ Deno.serve(async (req: Request) => {
         connected_at: new Date().toISOString(),
         revoked_at: null,
         webhook_last_error: null,
+        token_status: "valid",
+        last_sync_error: null,
       })
       .eq("id", connectionId);
   } else {

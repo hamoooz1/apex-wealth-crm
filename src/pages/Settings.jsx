@@ -17,6 +17,7 @@ import {
   loadMyZoomConnection,
   loadTeamIntegrationHealth,
   tokenHealth,
+  zoomConnectionState,
 } from '../lib/integrationHealth.js'
 import { syncCalendly } from '../lib/calendly.js'
 import { dispatchMyReminders } from '../lib/notifications.js'
@@ -569,6 +570,8 @@ export default function Settings() {
     }
   }
 
+  const zoomState = zoomConnectionState(zoomConn)
+
   return (
     <div>
       <div className="pageHeader">
@@ -962,8 +965,8 @@ export default function Settings() {
                       <div className="muted">Create meeting links when you schedule</div>
                     </div>
                   </div>
-                  <span className={['sStatus', zoomConn ? 'isOn' : null].filter(Boolean).join(' ')}>
-                    {zoomConn ? 'Connected' : 'Not connected'}
+                  <span className={['sStatus', zoomState.state === 'connected' ? 'isOn' : null].filter(Boolean).join(' ')}>
+                    {zoomState.label}
                   </span>
                 </div>
                 <div className="settingsBody">
@@ -972,7 +975,9 @@ export default function Settings() {
                   ) : null}
                   {zoomLoading ? <div className="inlineHint">Checking connection…</div> : null}
                   <div className="sHint">
-                    {zoomConn?.email || zoomConn?.zoom_user_id || 'Connect to generate Zoom links from the CRM.'}
+                    {zoomState.state === 'reconnect'
+                      ? 'Zoom was disconnected or the app was removed. Reconnect to create meetings and store recordings.'
+                      : zoomConn?.email || zoomConn?.zoom_user_id || 'Connect to generate Zoom links from the CRM.'}
                   </div>
                   {zoomConn ? (
                     <HealthList
@@ -992,7 +997,7 @@ export default function Settings() {
                   ) : null}
                   {zoomConn?.last_sync_error ? <div className="inlineError">{zoomConn.last_sync_error}</div> : null}
                   <div className="integActions">
-                    {zoomConn ? (
+                    {zoomState.state === 'connected' ? (
                       <button
                         className="btnSecondary"
                         type="button"
@@ -1003,7 +1008,7 @@ export default function Settings() {
                       </button>
                     ) : (
                       <button className="btnPrimary" type="button" onClick={onConnectZoom} disabled={zoomLoading}>
-                        {zoomLoading ? 'Connecting…' : 'Connect'}
+                        {zoomLoading ? 'Connecting…' : zoomState.state === 'reconnect' ? 'Reconnect' : 'Connect'}
                       </button>
                     )}
                   </div>

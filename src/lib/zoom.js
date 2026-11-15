@@ -34,17 +34,37 @@ export async function disconnectZoom() {
  * Does NOT persist a CRM meeting row — the caller saves that through the normal
  * createMeeting path so RLS + CRM linkage stay in the app layer.
  */
-export async function createZoomMeeting({ title, startTime, durationMinutes, timezone }) {
+export async function createZoomMeeting({
+  title,
+  startTime,
+  durationMinutes,
+  timezone,
+  action = 'create',
+  zoomMeetingId = null,
+  crmMeetingId = null,
+}) {
   const { data, error } = await supabase.functions.invoke('zoom-create-meeting', {
     body: {
+      action,
       title,
       start_time: startTime,
       duration: durationMinutes,
       timezone,
+      zoom_meeting_id: zoomMeetingId || undefined,
+      crm_meeting_id: crmMeetingId || undefined,
     },
   })
   if (error) throw error
   if (!data?.ok) throw new Error(data?.error || 'Zoom meeting creation failed.')
+  return data
+}
+
+export async function openRecording(recordingId, kind = 'media') {
+  const { data, error } = await supabase.functions.invoke('zoom-recording-access', {
+    body: { recording_id: recordingId, kind },
+  })
+  if (error) throw error
+  if (!data?.ok) throw new Error(data?.error || 'Could not open the recording.')
   return data
 }
 
@@ -59,6 +79,8 @@ export function zoomMeetingFields(zoom) {
     external_event_uri: zoom?.zoom_meeting_id ? `zoom:${zoom.zoom_meeting_id}` : null,
     meeting_type: 'zoom',
     meeting_url: zoom?.join_url || null,
+    zoom_meeting_id: zoom?.zoom_meeting_id || null,
+    zoom_meeting_uuid: zoom?.uuid || null,
     location: {
       provider: 'zoom',
       zoom_meeting_id: zoom?.zoom_meeting_id || null,

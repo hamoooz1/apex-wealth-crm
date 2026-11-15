@@ -137,13 +137,13 @@ export async function ensureCalendlyAccessToken(
   }
 }
 
-/** Refresh a Zoom token when it is missing or inside the skew window. Returns whether a call was made. */
+/** Refresh a Zoom token when it is missing or inside the skew window. */
 export async function ensureZoomAccessToken(
   admin: Admin,
   connectionId: string,
   clientId: string,
   clientSecret: string,
-): Promise<{ refreshed: boolean; status: "valid" | "missing" | "expired" }> {
+): Promise<{ refreshed: boolean; status: "valid" | "missing" | "expired"; accessToken: string | null }> {
   const tok = await loadToken(admin, "zoom_connection_tokens", connectionId);
   if (!tok?.access_token && !tok?.refresh_token) {
     await mirrorHealth(admin, "zoom_connections", connectionId, {
@@ -151,7 +151,7 @@ export async function ensureZoomAccessToken(
       token_status_at: new Date().toISOString(),
       last_sync_error: "Zoom tokens missing. Reconnect Zoom.",
     });
-    return { refreshed: false, status: "missing" };
+    return { refreshed: false, status: "missing", accessToken: null };
   }
   if (!tokenNeedsRefresh(tok)) {
     await mirrorHealth(admin, "zoom_connections", connectionId, {
@@ -159,7 +159,7 @@ export async function ensureZoomAccessToken(
       token_status: "valid",
       token_status_at: new Date().toISOString(),
     });
-    return { refreshed: false, status: "valid" };
+    return { refreshed: false, status: "valid", accessToken: tok!.access_token };
   }
   if (!tok?.refresh_token) {
     await mirrorHealth(admin, "zoom_connections", connectionId, {
@@ -167,12 +167,19 @@ export async function ensureZoomAccessToken(
       token_status_at: new Date().toISOString(),
       last_sync_error: "Zoom access token expired and no refresh token is stored.",
     });
-    return { refreshed: false, status: "expired" };
+    return { refreshed: false, status: "expired", accessToken: null };
   }
   try {
     const refreshed = await refreshZoom(clientId, clientSecret, tok.refresh_token);
-    await storeRefreshed(admin, "zoom_connection_tokens", "zoom_connections", connectionId, refreshed, tok.refresh_token);
-    return { refreshed: true, status: "valid" };
+    const accessToken = await storeRefreshed(
+      admin,
+      "zoom_connection_tokens",
+      "zoom_connections",
+      connectionId,
+      refreshed,
+      tok.refresh_token,
+    );
+    return { refreshed: true, status: "valid", accessToken };
   } catch (e) {
     const message = (e as Error).message || "Token refresh failed";
     await mirrorHealth(admin, "zoom_connections", connectionId, {

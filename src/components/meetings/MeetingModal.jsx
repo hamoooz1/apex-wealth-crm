@@ -92,6 +92,8 @@ export default function MeetingModal({
     location: meeting?.location || null,
     field_origins: meeting?.field_origins || {},
     provider_snapshot: meeting?.provider_snapshot || {},
+    zoom_meeting_id: meeting?.zoom_meeting_id || meeting?.location?.zoom_meeting_id || null,
+    provider_summary: meeting?.provider_summary || '',
   }))
 
   const [saving, setSaving] = useState(false)
@@ -126,7 +128,7 @@ export default function MeetingModal({
         return
       }
       try {
-        const recs = await getMeetingRecordings(meeting.id)
+        const recs = await getMeetingRecordings(meeting.id, meeting.zoom_meeting_id)
         if (mounted) setRecordings(recs)
       } catch {
         if (mounted) setRecordings([])
@@ -136,7 +138,7 @@ export default function MeetingModal({
     return () => {
       mounted = false
     }
-  }, [open, meeting?.id])
+  }, [open, meeting?.id, meeting?.zoom_meeting_id])
 
   const isZoomMeeting = draft.source === 'zoom' || draft.external_provider === 'zoom'
 
@@ -184,12 +186,19 @@ export default function MeetingModal({
         ? Math.max(5, Math.round((new Date(draft.end_time) - new Date(draft.start_time)) / 60000))
         : 30
       const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'
+      const previousId = draft.zoom_meeting_id || draft.location?.zoom_meeting_id || null
       const zoom = await createZoomMeeting({
         title: draft.title.trim() || 'Meeting',
         startTime: draft.start_time,
         durationMinutes,
         timezone,
+        action: previousId ? 'regenerate' : 'create',
+        zoomMeetingId: previousId,
+        crmMeetingId: draft.id,
       })
+      if (zoom.previous_delete === 'failed') {
+        setZoomError(new Error('The new Zoom meeting is saved. Zoom did not delete the previous one.'))
+      }
       setDraft((d) => ({ ...d, ...zoomMeetingFields(zoom) }))
     } catch (e) {
       setZoomError(e)
@@ -217,6 +226,8 @@ export default function MeetingModal({
         external_provider: draft.external_provider || null,
         external_event_uri: draft.external_event_uri || null,
         location: draft.location || null,
+        zoom_meeting_id: draft.zoom_meeting_id || null,
+        zoom_meeting_uuid: draft.zoom_meeting_uuid || null,
       }
 
       // For Calendly meetings, only allow CRM-linkage + notes/status tweaks.
@@ -416,6 +427,13 @@ export default function MeetingModal({
                 options={clientOptions}
               />
             </label>
+
+            {draft.provider_summary ? (
+              <div className="sField" style={{ gridColumn: '1 / -1' }}>
+                <div className="sLabel">Zoom summary</div>
+                <div className="sHint" style={{ whiteSpace: 'pre-wrap' }}>{draft.provider_summary}</div>
+              </div>
+            ) : null}
 
             {recordings.length > 0 ? (
               <div className="sField recSection" style={{ gridColumn: '1 / -1' }}>

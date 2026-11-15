@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Plus, Search, Save, X } from 'lucide-react'
 
-import { fetchProfilesPageData, LEAD_COLUMNS } from '../lib/queries.js'
+import { fetchProfilesPageData, getLeadMeetings, LEAD_COLUMNS } from '../lib/queries.js'
 import { supabase } from '../lib/supabaseClient.js'
 import { useAuth } from '../contexts/AuthContext.jsx'
 import { confettiBurst } from '../lib/confetti.js'
@@ -113,6 +113,7 @@ export default function Leads() {
   const [draft, setDraft] = useState(null)
   const [saving, setSaving] = useState(false)
   const [dirty, setDirty] = useState(false)
+  const [leadMeetings, setLeadMeetings] = useState([])
 
   useEffect(() => {
     let mounted = true
@@ -140,6 +141,21 @@ export default function Leads() {
       mounted = false
     }
   }, [])
+
+  useEffect(() => {
+    if (!modalOpen || !editingId) return undefined
+    let mounted = true
+    getLeadMeetings(editingId)
+      .then((rows) => {
+        if (mounted) setLeadMeetings(rows)
+      })
+      .catch(() => {
+        if (mounted) setLeadMeetings([])
+      })
+    return () => {
+      mounted = false
+    }
+  }, [modalOpen, editingId])
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase()
@@ -462,6 +478,22 @@ export default function Leads() {
                     options={advisorOptions}
                   />
                 </label>
+                {editingId && leadMeetings.length > 0 ? (
+                  <div className="sField" style={{ gridColumn: '1 / -1' }}>
+                    <div className="sLabel">Meetings</div>
+                    <div className="sHint">
+                      {leadMeetings.slice(0, 6).map((m) => (
+                        <div key={m.id} style={{ marginBottom: 8 }}>
+                          <strong>{m.title || 'Meeting'}</strong>
+                          {m.start_time ? ` · ${new Date(m.start_time).toLocaleString()}` : ''}
+                          {m.provider_summary ? (
+                            <div style={{ whiteSpace: 'pre-wrap' }}>{m.provider_summary.slice(0, 280)}</div>
+                          ) : null}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
                 <label className="sField" style={{ gridColumn: '1 / -1' }}>
                   <div className="sLabel">Notes</div>
                   <textarea
