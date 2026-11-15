@@ -3,13 +3,22 @@ import { CalendarDays, Camera, Eye, EyeOff, Plus, Save, Video } from 'lucide-rea
 import './Settings.css'
 import { useAuth } from '../contexts/AuthContext.jsx'
 import {
-  createProfileRow,
   fetchProfilesPageData,
   updateProfileById,
+  updateProfileAccess,
   getMyPreferences,
   saveMyPreferences,
 } from '../lib/queries.js'
-import { getMyZoomConnection, startZoomConnect, disconnectZoom } from '../lib/zoom.js'
+import { startZoomConnect, disconnectZoom } from '../lib/zoom.js'
+import {
+  calendlyUpdateMode,
+  formatWhen,
+  loadMyCalendlyConnection,
+  loadMyZoomConnection,
+  loadTeamIntegrationHealth,
+  tokenHealth,
+  zoomConnectionState,
+} from '../lib/integrationHealth.js'
 import { syncCalendly } from '../lib/calendly.js'
 import { dispatchMyReminders } from '../lib/notifications.js'
 import { supabase } from '../lib/supabaseClient.js'
@@ -51,6 +60,19 @@ function Switch({ checked, onChange, disabled, labelledBy }) {
   )
 }
 
+function HealthList({ rows }) {
+  return (
+    <dl className="integHealth">
+      {rows.map((row) => (
+        <div key={row.label}>
+          <dt>{row.label}</dt>
+          <dd className={row.tone ? `is-${row.tone}` : undefined}>{row.value}</dd>
+        </div>
+      ))}
+    </dl>
+  )
+}
+
 function calendlyDisplay(uri) {
   if (!uri) return 'Not connected'
   const slug = String(uri).split('/').filter(Boolean).pop()
@@ -60,7 +82,6 @@ function calendlyDisplay(uri) {
 export default function Settings() {
   const { profile, user, refreshProfile, profileLoading, profileError } = useAuth()
   const isAdmin = profile?.role === 'admin'
-  const isManager = profile?.role === 'manager'
   const canManageTeam = canManageTeamTab(profile)
   const [activeTab, setActiveTab] = useState('profile')
 
@@ -168,21 +189,16 @@ export default function Settings() {
     }
   }, [profile?.id])
 
+  const [teamHealth, setTeamHealth] = useState([])
+  const [teamHealthError, setTeamHealthError] = useState(null)
+
   // Section 4: Calendly
   const [calendlyConn, setCalendlyConn] = useState(null)
   const [calendlyLoading, setCalendlyLoading] = useState(false)
   const [calendlyError, setCalendlyError] = useState(null)
 
   async function loadCalendlyConnection(userId) {
-    if (!userId) return null
-    const { data, error } = await supabase
-      .from('calendly_connections')
-      .select('*')
-      .eq('user_id', userId)
-      .is('revoked_at', null)
-      .maybeSingle()
-    if (error) throw error
-    return data || null
+    return loadMyCalendlyConnection(userId)
   }
 
   useEffect(() => {
@@ -257,6 +273,8 @@ export default function Settings() {
       setCalendlySyncMsg(
         `Synced ${res?.events || 0} event${res?.events === 1 ? '' : 's'} · ${added} added, ${updated} updated.`,
       )
+      const row = await loadCalendlyConnection(profile?.id)
+      setCalendlyConn(row)
     } catch (e) {
       setCalendlyError(e)
     } finally {
@@ -280,7 +298,7 @@ export default function Settings() {
       setZoomLoading(true)
       setZoomError(null)
       try {
-        const row = await getMyZoomConnection(profile.id)
+        const row = await loadMyZoomConnection(profile.id)
         if (!mounted) return
         setZoomConn(row)
       } catch (e) {
@@ -296,6 +314,21 @@ export default function Settings() {
       mounted = false
     }
   }, [profile?.id])
+
+  useEffect(() => {
+    if (!isAdmin || activeTab !== 'integrations') return undefined
+    let mounted = true
+    loadTeamIntegrationHealth()
+      .then((rows) => {
+        if (mounted) setTeamHealth(rows)
+      })
+      .catch((e) => {
+        if (mounted) setTeamHealthError(e)
+      })
+    return () => {
+      mounted = false
+    }
+  }, [isAdmin, activeTab, calendlyConn, zoomConn])
 
   async function onConnectZoom() {
     setZoomError(null)
@@ -314,7 +347,7 @@ export default function Settings() {
     setZoomLoading(true)
     try {
       await disconnectZoom()
-      const row = await getMyZoomConnection(profile?.id)
+      const row = await loadMyZoomConnection(profile?.id)
       setZoomConn(row)
     } catch (e) {
       setZoomError(e)
@@ -419,40 +452,36 @@ export default function Settings() {
     setTeamError(null)
     setTeam((prev) => prev.map((p) => (p.id === id ? { ...p, ...patch } : p)))
     try {
-      await updateProfileById(id, patch)
+      const access = {}
+      const safe = {}
+      if ('role' in patch) access.role = patch.role
+      if ('manager_id' in patch) access.manager_id = patch.manager_id
+      if ('is_active' in patch) access.is_active = patch.is_active
+      for (const [key, value] of Object.entries(patch)) {
+        if (key === 'role' || key === 'manager_id' || key === 'is_active') continue
+        safe[key] = value
+      }
+      if (Object.keys(access).length) await updateProfileAccess(id, access)
+      if (Object.keys(safe).length) await updateProfileById(id, safe)
     } catch (e) {
       setTeamError(e)
     }
-  }
-
-  async function ensureProfileRowExists() {
-    if (profile) return profile
-    if (!user?.id) return null
-    const payload = {
-      id: user.id,
-      full_name: user.user_metadata?.full_name || user.email?.split('@')?.[0] || 'New User',
-      email: user.email,
-      role: 'advisor',
-      manager_id: null,
-      is_active: true,
-    }
-    const created = await createProfileRow(payload)
-    await refreshProfile()
-    return created
   }
 
   async function onSaveProfile() {
     setProfileSaveError(null)
     setSavingProfile(true)
     try {
-      const p = await ensureProfileRowExists()
-      const id = p?.id || profile?.id
-      if (!id) throw new Error('No profile row found for current user.')
+      const id = profile?.id
+      if (!id) throw new Error('No profile row found for this account. Ask an admin to send a new invite.')
 
-      const patch = { full_name: myProfile.full_name, avatar_url: myProfile.avatar_url || null }
-      if (isAdmin) patch.is_active = !!myProfile.is_active
-
-      await updateProfileById(id, patch)
+      await updateProfileById(id, {
+        full_name: myProfile.full_name,
+        avatar_url: myProfile.avatar_url || null,
+      })
+      if (isAdmin && myProfile.is_active !== savedProfile.is_active) {
+        await updateProfileAccess(id, { is_active: !!myProfile.is_active })
+      }
       await refreshProfile()
       setSavedProfile(myProfile)
     } catch (e) {
@@ -467,9 +496,13 @@ export default function Settings() {
     setProfileSaveError(null)
     setSavingProfile(true)
     try {
-      const p = await ensureProfileRowExists()
-      const id = p?.id || profile?.id
-      if (!id) throw new Error('No profile row found for current user.')
+      const id = profile?.id
+      if (!id) throw new Error('No profile row found for this account. Ask an admin to send a new invite.')
+      if (file.size > 2 * 1024 * 1024) throw new Error('Avatar must be 2 MB or smaller.')
+      const allowed = ['image/jpeg', 'image/png', 'image/webp', 'image/gif']
+      if (file.type && !allowed.includes(file.type)) {
+        throw new Error('Avatar must be a JPEG, PNG, WEBP, or GIF.')
+      }
 
       const ext = file.name.split('.').pop() || 'png'
       const path = `${id}/avatar.${ext}`
@@ -536,6 +569,8 @@ export default function Settings() {
       setRemindersBusy(false)
     }
   }
+
+  const zoomState = zoomConnectionState(zoomConn)
 
   return (
     <div>
@@ -861,14 +896,33 @@ export default function Settings() {
                       ? calendlyDisplay(calendlyConn.calendly_user_uri)
                       : 'Connect to pull your bookings into Apex.'}
                   </div>
+                  {calendlyConn ? (
+                    <HealthList
+                      rows={[
+                        {
+                          label: 'Token',
+                          value: tokenHealth(calendlyConn.token_status, calendlyConn.token_expires_at).label,
+                          tone: tokenHealth(calendlyConn.token_status, calendlyConn.token_expires_at).tone,
+                        },
+                        { label: 'Last synced', value: formatWhen(calendlyConn.last_synced_at) },
+                        { label: 'Updates', value: calendlyUpdateMode(calendlyConn) },
+                        ...(calendlyConn.last_webhook_at
+                          ? [{ label: 'Last webhook', value: formatWhen(calendlyConn.last_webhook_at) }]
+                          : []),
+                      ]}
+                    />
+                  ) : null}
                   {calendlyConn?.webhook_last_error ? (
                     <div className="inlineHint">
                       {/calendly account to standard|permission denied|upgrade/i.test(
                         calendlyConn.webhook_last_error,
                       )
-                        ? 'Connected. Automatic sync needs a paid Calendly plan — use Sync now on the free plan.'
-                        : `Connected, but automatic sync may be inactive.`}
+                        ? 'Webhooks need a paid Calendly plan. The 30-minute reconcile still imports bookings.'
+                        : 'Webhook setup did not finish. Bookings still reconcile every 30 minutes.'}
                     </div>
+                  ) : null}
+                  {calendlyConn?.last_sync_error ? (
+                    <div className="inlineError">{calendlyConn.last_sync_error}</div>
                   ) : null}
                   {calendlySyncMsg ? <div className="inlineHint">{calendlySyncMsg}</div> : null}
                   <div className="integActions">
@@ -911,8 +965,8 @@ export default function Settings() {
                       <div className="muted">Create meeting links when you schedule</div>
                     </div>
                   </div>
-                  <span className={['sStatus', zoomConn ? 'isOn' : null].filter(Boolean).join(' ')}>
-                    {zoomConn ? 'Connected' : 'Not connected'}
+                  <span className={['sStatus', zoomState.state === 'connected' ? 'isOn' : null].filter(Boolean).join(' ')}>
+                    {zoomState.label}
                   </span>
                 </div>
                 <div className="settingsBody">
@@ -921,10 +975,29 @@ export default function Settings() {
                   ) : null}
                   {zoomLoading ? <div className="inlineHint">Checking connection…</div> : null}
                   <div className="sHint">
-                    {zoomConn?.email || zoomConn?.zoom_user_id || 'Connect to generate Zoom links from the CRM.'}
+                    {zoomState.state === 'reconnect'
+                      ? 'Zoom was disconnected or the app was removed. Reconnect to create meetings and store recordings.'
+                      : zoomConn?.email || zoomConn?.zoom_user_id || 'Connect to generate Zoom links from the CRM.'}
                   </div>
+                  {zoomConn ? (
+                    <HealthList
+                      rows={[
+                        {
+                          label: 'Token',
+                          value: tokenHealth(zoomConn.token_status, zoomConn.token_expires_at).label,
+                          tone: tokenHealth(zoomConn.token_status, zoomConn.token_expires_at).tone,
+                        },
+                        {
+                          label: 'Last token check',
+                          value: formatWhen(zoomConn.token_status_at || zoomConn.last_reconcile_at),
+                        },
+                        { label: 'Last webhook', value: formatWhen(zoomConn.last_webhook_at) },
+                      ]}
+                    />
+                  ) : null}
+                  {zoomConn?.last_sync_error ? <div className="inlineError">{zoomConn.last_sync_error}</div> : null}
                   <div className="integActions">
-                    {zoomConn ? (
+                    {zoomState.state === 'connected' ? (
                       <button
                         className="btnSecondary"
                         type="button"
@@ -935,12 +1008,62 @@ export default function Settings() {
                       </button>
                     ) : (
                       <button className="btnPrimary" type="button" onClick={onConnectZoom} disabled={zoomLoading}>
-                        {zoomLoading ? 'Connecting…' : 'Connect'}
+                        {zoomLoading ? 'Connecting…' : zoomState.state === 'reconnect' ? 'Reconnect' : 'Connect'}
                       </button>
                     )}
                   </div>
                 </div>
               </div>
+
+              {isAdmin ? (
+                <div className="card settingsCard integrationsTeam">
+                  <div className="cardHeader">
+                    <div>
+                      <div className="cardTitle">Team integrations</div>
+                      <div className="muted">Token and last sync for each connected advisor</div>
+                    </div>
+                  </div>
+                  <div className="settingsBody">
+                    {teamHealthError ? (
+                      <div className="inlineError">{teamHealthError.message || 'Could not load team integrations.'}</div>
+                    ) : null}
+                    {teamHealth.length === 0 ? (
+                      <div className="sHint">No connected Calendly or Zoom accounts yet.</div>
+                    ) : (
+                      <div className="adminTableWrap">
+                        <table className="adminTable">
+                          <thead>
+                            <tr>
+                              <th>Advisor</th>
+                              <th>Calendly</th>
+                              <th>Last synced</th>
+                              <th>Zoom</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {teamHealth.map((row) => (
+                              <tr key={row.userId}>
+                                <td>{row.name}</td>
+                                <td>
+                                  {row.calendly
+                                    ? tokenHealth(row.calendly.token_status, row.calendly.token_expires_at).label
+                                    : 'Not connected'}
+                                </td>
+                                <td>{row.calendly ? formatWhen(row.calendly.last_synced_at) : '—'}</td>
+                                <td>
+                                  {row.zoom
+                                    ? tokenHealth(row.zoom.token_status, row.zoom.token_expires_at).label
+                                    : 'Not connected'}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ) : null}
             </div>
           ) : null}
 

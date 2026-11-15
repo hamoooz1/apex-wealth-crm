@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { Save, Video } from 'lucide-react'
 import './MeetingModal.css'
 import { createMeeting, getMeetingRecordings, updateMeetingById } from '../../lib/queries.js'
-import { createZoomMeeting, getMyZoomConnection, zoomMeetingFields } from '../../lib/zoom.js'
+import { createZoomMeeting, getMyZoomConnection, saveMeetingChanges, zoomMeetingFields } from '../../lib/zoom.js'
 import RecordingList from '../recordings/RecordingList.jsx'
 import Select from '../ui/Select.jsx'
 
@@ -10,6 +10,7 @@ const meetingStatusOptions = [
   { value: 'scheduled', label: 'Scheduled' },
   { value: 'completed', label: 'Completed' },
   { value: 'canceled', label: 'Canceled' },
+  { value: 'no_show', label: 'No-show' },
 ]
 
 function toLocalInputValue(iso) {
@@ -28,6 +29,35 @@ function fromLocalInputValue(v) {
   if (!v) return null
   const d = new Date(v)
   return d.toISOString()
+}
+
+function sameFieldValue(a, b) {
+  if (a == null && b == null) return true
+  if (a == null || b == null) return false
+  const left = Date.parse(a)
+  const right = Date.parse(b)
+  if (!Number.isNaN(left) && !Number.isNaN(right)) return left === right
+  return String(a) === String(b)
+}
+
+function formatProviderValue(field, value) {
+  if (value == null || value === '') return ''
+  if (field === 'start_time' || field === 'end_time') {
+    const d = new Date(value)
+    if (!Number.isNaN(d.getTime())) {
+      return d.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
+    }
+  }
+  return String(value)
+}
+
+/** Advisor-owned value when it differs from the last provider payload. */
+function providerDrift(draft, field) {
+  if (draft?.field_origins?.[field] !== 'advisor') return null
+  const snap = draft?.provider_snapshot?.[field]
+  if (snap == null || snap === '') return null
+  if (sameFieldValue(snap, draft[field])) return null
+  return formatProviderValue(field, snap)
 }
 
 export default function MeetingModal({
@@ -60,6 +90,14 @@ export default function MeetingModal({
     external_provider: meeting?.external_provider || null,
     external_event_uri: meeting?.external_event_uri || null,
     location: meeting?.location || null,
+    field_origins: meeting?.field_origins || {},
+    provider_snapshot: meeting?.provider_snapshot || {},
+    zoom_meeting_id: meeting?.zoom_meeting_id || meeting?.location?.zoom_meeting_id || null,
+    provider_summary: meeting?.provider_summary || '',
+    link_origin: meeting?.link_origin || null,
+    invitee_email: meeting?.invitee_email || null,
+    last_writeback_error: meeting?.last_writeback_error || null,
+    last_writeback_note: meeting?.last_writeback_note || null,
   }))
 
   const [saving, setSaving] = useState(false)
@@ -94,7 +132,7 @@ export default function MeetingModal({
         return
       }
       try {
-        const recs = await getMeetingRecordings(meeting.id)
+        const recs = await getMeetingRecordings(meeting.id, meeting.zoom_meeting_id)
         if (mounted) setRecordings(recs)
       } catch {
         if (mounted) setRecordings([])
@@ -104,7 +142,7 @@ export default function MeetingModal({
     return () => {
       mounted = false
     }
-  }, [open, meeting?.id])
+  }, [open, meeting?.id, meeting?.zoom_meeting_id])
 
   const isZoomMeeting = draft.source === 'zoom' || draft.external_provider === 'zoom'
 
@@ -138,7 +176,11 @@ export default function MeetingModal({
 
   if (!open) return null
 
-  const canEditCore = !isCalendly
+  const canEditCore = true
+  const providerBacked = isCalendly || isZoomMeeting || Boolean(draft.zoom_meeting_id)
+  const titleDrift = providerDrift(draft, 'title')
+  const startDrift = providerDrift(draft, 'start_time')
+  const providerName = draft.source === 'zoom' || draft.external_provider === 'zoom' ? 'Zoom' : 'Calendly'
 
   async function onGenerateZoom() {
     setZoomError(null)
@@ -149,12 +191,19 @@ export default function MeetingModal({
         ? Math.max(5, Math.round((new Date(draft.end_time) - new Date(draft.start_time)) / 60000))
         : 30
       const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'
+      const previousId = draft.zoom_meeting_id || draft.location?.zoom_meeting_id || null
       const zoom = await createZoomMeeting({
         title: draft.title.trim() || 'Meeting',
         startTime: draft.start_time,
         durationMinutes,
         timezone,
+        action: previousId ? 'regenerate' : 'create',
+        zoomMeetingId: previousId,
+        crmMeetingId: draft.id,
       })
+      if (zoom.previous_delete === 'failed') {
+        setZoomError(new Error('The new Zoom meeting is saved. Zoom did not delete the previous one.'))
+      }
       setDraft((d) => ({ ...d, ...zoomMeetingFields(zoom) }))
     } catch (e) {
       setZoomError(e)
@@ -182,17 +231,12 @@ export default function MeetingModal({
         external_provider: draft.external_provider || null,
         external_event_uri: draft.external_event_uri || null,
         location: draft.location || null,
+        zoom_meeting_id: draft.zoom_meeting_id || null,
+        zoom_meeting_uuid: draft.zoom_meeting_uuid || null,
       }
 
-      // For Calendly meetings, only allow CRM-linkage + notes/status tweaks.
-      if (isCalendly) {
-        const safePatch = {
-          lead_id: payload.lead_id,
-          client_id: payload.client_id,
-          notes: payload.notes,
-          status: payload.status,
-        }
-        await updateMeetingById(draft.id, safePatch)
+      if (!isNew && providerBacked) {
+        await saveMeetingChanges(draft.id, payload)
       } else if (isNew) {
         await createMeeting(payload)
       } else {
@@ -214,7 +258,9 @@ export default function MeetingModal({
           <div>
             <div className="modalTitle">{isNew ? 'New meeting' : isCalendly ? 'Calendly meeting' : 'Edit meeting'}</div>
             <div className="modalSub">
-              {isCalendly ? 'Synced from Calendly (time/title are read-only).' : 'Create and link meetings to CRM records.'}
+              {isCalendly
+                ? 'Calendly can be canceled from here. It cannot move the time; a time you set is kept in the CRM and sent to Zoom.'
+                : 'Notes, status, and the client or lead link stay when a provider syncs. A time or title you edit is kept too.'}
             </div>
           </div>
           <button className="iconBtn" type="button" onClick={onClose} aria-label="Close">
@@ -224,6 +270,8 @@ export default function MeetingModal({
 
         <div className="modalBody">
           {error ? <div className="inlineError">{error.message || 'Failed to save meeting.'}</div> : null}
+          {draft.last_writeback_error ? <div className="inlineError">{draft.last_writeback_error}</div> : null}
+          {draft.last_writeback_note ? <div className="sHint">{draft.last_writeback_note}</div> : null}
 
           <div className="formGrid">
             <label className="sField" style={{ gridColumn: '1 / -1' }}>
@@ -234,6 +282,9 @@ export default function MeetingModal({
                 onChange={(e) => setDraft((d) => ({ ...d, title: e.target.value }))}
                 disabled={!canEditCore}
               />
+              {titleDrift ? (
+                <div className="sHint">{providerName} still has “{titleDrift}”. Your title is kept.</div>
+              ) : null}
             </label>
 
             <label className="sField">
@@ -245,6 +296,9 @@ export default function MeetingModal({
                 onChange={(e) => setDraft((d) => ({ ...d, start_time: fromLocalInputValue(e.target.value) }))}
                 disabled={!canEditCore}
               />
+              {startDrift ? (
+                <div className="sHint">{providerName} still has {startDrift}. Your time is kept.</div>
+              ) : null}
             </label>
 
             <label className="sField">
@@ -299,7 +353,7 @@ export default function MeetingModal({
               />
             </label>
 
-            {canEditCore ? (
+            {!isCalendly ? (
               <div className="sField zoomField" style={{ gridColumn: '1 / -1' }}>
                 <div className="sLabel">Zoom</div>
                 {zoomError ? (
@@ -344,6 +398,15 @@ export default function MeetingModal({
               </div>
             ) : null}
 
+            <div className="sField" style={{ gridColumn: '1 / -1' }}>
+              <div className="sHint">
+                {draft.link_origin === 'auto'
+                  ? `Matched from ${draft.invitee_email || 'the invitee email'}. Changing the client or lead is kept.`
+                  : draft.link_origin === 'unlinked'
+                    ? 'You cleared this link. Sync will not attach a client or lead again.'
+                    : 'A client or lead you pick here is kept when Calendly or Zoom syncs.'}
+              </div>
+            </div>
             <label className="sField">
               <div className="sLabel">Link to lead</div>
               <Select
@@ -373,6 +436,13 @@ export default function MeetingModal({
                 options={clientOptions}
               />
             </label>
+
+            {draft.provider_summary ? (
+              <div className="sField" style={{ gridColumn: '1 / -1' }}>
+                <div className="sLabel">Zoom summary</div>
+                <div className="sHint" style={{ whiteSpace: 'pre-wrap' }}>{draft.provider_summary}</div>
+              </div>
+            ) : null}
 
             {recordings.length > 0 ? (
               <div className="sField recSection" style={{ gridColumn: '1 / -1' }}>

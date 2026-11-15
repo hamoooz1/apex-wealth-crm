@@ -13,6 +13,7 @@ import {
 } from 'lucide-react'
 
 import { useAuth } from '../../contexts/AuthContext.jsx'
+import { rolesForPath } from '../../lib/access.js'
 import apexLogo from '../../assets/apex-wealth-logo.png'
 import Avatar from '../ui/Avatar.jsx'
 
@@ -62,11 +63,16 @@ export default function Sidebar({ open = false, onClose }) {
       </div>
 
       <nav className="sidebarNav">
-        {navSections.map((section) => (
+        {navSections.map((section) => {
+          const items = section.items.filter(
+            (item) => !item.to || rolesForPath(item.to).includes(profile?.role),
+          )
+          if (!items.length) return null
+          return (
           <div className="navSection" key={section.label}>
             <div className="navSectionLabel">{section.label}</div>
             <div className="navItems">
-              {section.items.map((item) => {
+              {items.map((item) => {
                 const Icon = item.icon
                 if (item.disabled || !item.to) {
                   return (
@@ -99,7 +105,8 @@ export default function Sidebar({ open = false, onClose }) {
               })}
             </div>
           </div>
-        ))}
+          )
+        })}
       </nav>
 
       <div className="sidebarBottom">

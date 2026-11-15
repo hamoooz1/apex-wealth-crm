@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Plus, Search, Save, X } from 'lucide-react'
 
-import { fetchProfilesPageData } from '../lib/queries.js'
+import { fetchProfilesPageData, formatAlternateEmails, getLeadMeetings, LEAD_COLUMNS, parseAlternateEmails } from '../lib/queries.js'
 import { supabase } from '../lib/supabaseClient.js'
 import { useAuth } from '../contexts/AuthContext.jsx'
 import { confettiBurst } from '../lib/confetti.js'
@@ -67,6 +67,7 @@ async function convertLeadToClient({ leadId, patchLead, leadRow }) {
       first_name: leadRow.first_name,
       last_name: leadRow.last_name || null,
       email: leadRow.email || null,
+      alternate_emails: parseAlternateEmails(leadRow.alternate_emails),
       phone: leadRow.phone || null,
       advisor_id: leadRow.assigned_to || null,
       aum: null,
@@ -113,6 +114,7 @@ export default function Leads() {
   const [draft, setDraft] = useState(null)
   const [saving, setSaving] = useState(false)
   const [dirty, setDirty] = useState(false)
+  const [leadMeetings, setLeadMeetings] = useState([])
 
   useEffect(() => {
     let mounted = true
@@ -122,7 +124,7 @@ export default function Leads() {
       try {
         const [profilesRows, leadsRes] = await Promise.all([
           fetchProfilesPageData(),
-          supabase.from('leads').select('*').order('created_at', { ascending: false }),
+          supabase.from('leads').select(LEAD_COLUMNS).order('created_at', { ascending: false }),
         ])
         if (leadsRes.error) throw leadsRes.error
         if (!mounted) return
@@ -140,6 +142,21 @@ export default function Leads() {
       mounted = false
     }
   }, [])
+
+  useEffect(() => {
+    if (!modalOpen || !editingId) return undefined
+    let mounted = true
+    getLeadMeetings(editingId)
+      .then((rows) => {
+        if (mounted) setLeadMeetings(rows)
+      })
+      .catch(() => {
+        if (mounted) setLeadMeetings([])
+      })
+    return () => {
+      mounted = false
+    }
+  }, [modalOpen, editingId])
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase()
@@ -175,6 +192,7 @@ export default function Leads() {
       first_name: '',
       last_name: '',
       email: '',
+      alternate_emails: '',
       phone: '',
       source: '',
       status: 'new',
@@ -191,6 +209,7 @@ export default function Leads() {
       first_name: lead.first_name || '',
       last_name: lead.last_name || '',
       email: lead.email || '',
+      alternate_emails: formatAlternateEmails(lead.alternate_emails),
       phone: lead.phone || '',
       source: lead.source || '',
       status: lead.status || 'new',
@@ -210,6 +229,7 @@ export default function Leads() {
         const prev = leads.find((l) => l.id === editingId)
         const patch = {
           ...draft,
+          alternate_emails: parseAlternateEmails(draft.alternate_emails),
           assigned_to: draft.assigned_to || null,
           updated_at: new Date().toISOString(),
         }
@@ -240,6 +260,7 @@ export default function Leads() {
       } else {
         const payload = {
           ...draft,
+          alternate_emails: parseAlternateEmails(draft.alternate_emails),
           assigned_to: draft.assigned_to || null,
           created_at: new Date().toISOString(),
           updated_at: new Date().toISOString(),
@@ -419,6 +440,18 @@ export default function Leads() {
                   />
                 </label>
                 <label className="sField">
+                  <div className="sLabel">Other emails</div>
+                  <input
+                    className="sInput"
+                    value={draft.alternate_emails}
+                    onChange={(e) => {
+                      setDraft((d) => ({ ...d, alternate_emails: e.target.value }))
+                      setDirty(true)
+                    }}
+                    placeholder="comma-separated"
+                  />
+                </label>
+                <label className="sField">
                   <div className="sLabel">Phone</div>
                   <input
                     className="sInput"
@@ -462,6 +495,22 @@ export default function Leads() {
                     options={advisorOptions}
                   />
                 </label>
+                {editingId && leadMeetings.length > 0 ? (
+                  <div className="sField" style={{ gridColumn: '1 / -1' }}>
+                    <div className="sLabel">Meetings</div>
+                    <div className="sHint">
+                      {leadMeetings.slice(0, 6).map((m) => (
+                        <div key={m.id} style={{ marginBottom: 8 }}>
+                          <strong>{m.title || 'Meeting'}</strong>
+                          {m.start_time ? ` · ${new Date(m.start_time).toLocaleString()}` : ''}
+                          {m.provider_summary ? (
+                            <div style={{ whiteSpace: 'pre-wrap' }}>{m.provider_summary.slice(0, 280)}</div>
+                          ) : null}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
                 <label className="sField" style={{ gridColumn: '1 / -1' }}>
                   <div className="sLabel">Notes</div>
                   <textarea

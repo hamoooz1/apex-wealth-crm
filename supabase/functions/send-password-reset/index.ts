@@ -45,12 +45,16 @@ Deno.serve(async (req) => {
 
     const { data: callerProfile, error: profErr } = await adminClient
       .from("profiles")
-      .select("id, role")
+      .select("id, role, is_active")
       .eq("id", callerData.user.id)
       .maybeSingle();
 
     if (profErr || !callerProfile) {
       return json({ error: "Caller profile missing" }, 403);
+    }
+
+    if (callerProfile.is_active === false) {
+      return json({ error: "Your account is inactive" }, 403);
     }
 
     const isAdmin = callerProfile.role === "admin";

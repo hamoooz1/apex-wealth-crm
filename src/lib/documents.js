@@ -2,10 +2,6 @@ import { supabase } from './supabaseClient.js'
 
 const BUCKET = 'client-documents'
 
-function safeFileName(name) {
-  return String(name || 'file').replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 120)
-}
-
 export async function getClientDocuments(clientId) {
   if (!clientId) return []
   const { data, error } = await supabase

@@ -7,7 +7,7 @@ async function fetchMyProfile(userId) {
   if (!userId) return null
   const { data, error } = await supabase
     .from('profiles')
-    .select('*')
+    .select('id, full_name, email, role, avatar_url, manager_id, is_active')
     .eq('id', userId)
     .maybeSingle()
 
@@ -23,6 +23,15 @@ export function AuthProvider({ children }) {
   const [loading, setLoading] = useState(true)
   const [profileLoading, setProfileLoading] = useState(false)
   const [profileError, setProfileError] = useState(null)
+  const userId = user?.id ?? null
+  const [trackedUserId, setTrackedUserId] = useState(userId)
+
+  if (userId !== trackedUserId) {
+    setTrackedUserId(userId)
+    setProfile(null)
+    setProfileError(null)
+    setProfileLoading(Boolean(userId))
+  }
 
   useEffect(() => {
     let mounted = true
