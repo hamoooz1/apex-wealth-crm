@@ -38,4 +38,6 @@ fi
 "${PSQL[@]}" -v ON_ERROR_STOP=1 -d "$DB" -f "$ROOT/supabase/tests/meeting_people_links_test.sql"
 "${PSQL[@]}" -v ON_ERROR_STOP=1 -d "$DB" -f "$ROOT/supabase/migrations/20261115160000_meeting_people_links.sql"
 "${PSQL[@]}" -v ON_ERROR_STOP=1 -d "$DB" -f "$ROOT/supabase/tests/meeting_people_links_test.sql"
+"${PSQL[@]}" -v ON_ERROR_STOP=1 -d "$DB" -f "$ROOT/supabase/migrations/20261115170000_meeting_writeback.sql"
+"${PSQL[@]}" -v ON_ERROR_STOP=1 -d "$DB" -f "$ROOT/supabase/migrations/20261115170000_meeting_writeback.sql"
 echo "meeting sync migration ok"

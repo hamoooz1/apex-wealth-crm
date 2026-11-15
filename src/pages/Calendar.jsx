@@ -9,7 +9,8 @@ import {
   RefreshCw,
 } from 'lucide-react'
 import { useAuth } from '../contexts/AuthContext.jsx'
-import { fetchCalendarPageData, fetchMeetings, deleteMeetingById } from '../lib/queries.js'
+import { fetchCalendarPageData, fetchMeetings } from '../lib/queries.js'
+import { deleteMeetingEverywhere } from '../lib/zoom.js'
 import { syncCalendly } from '../lib/calendly.js'
 import MeetingModal from '../components/meetings/MeetingModal.jsx'
 import Select from '../components/ui/Select.jsx'
@@ -226,7 +227,7 @@ export default function Calendar() {
     setLoading(true)
     setError(null)
     try {
-      await deleteMeetingById(m.id)
+      await deleteMeetingEverywhere(m.id)
       await loadPage()
     } catch (e) {
       setError(e)

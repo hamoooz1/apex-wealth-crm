@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { Save, Video } from 'lucide-react'
 import './MeetingModal.css'
 import { createMeeting, getMeetingRecordings, updateMeetingById } from '../../lib/queries.js'
-import { createZoomMeeting, getMyZoomConnection, zoomMeetingFields } from '../../lib/zoom.js'
+import { createZoomMeeting, getMyZoomConnection, saveMeetingChanges, zoomMeetingFields } from '../../lib/zoom.js'
 import RecordingList from '../recordings/RecordingList.jsx'
 import Select from '../ui/Select.jsx'
 
@@ -94,6 +94,10 @@ export default function MeetingModal({
     provider_snapshot: meeting?.provider_snapshot || {},
     zoom_meeting_id: meeting?.zoom_meeting_id || meeting?.location?.zoom_meeting_id || null,
     provider_summary: meeting?.provider_summary || '',
+    link_origin: meeting?.link_origin || null,
+    invitee_email: meeting?.invitee_email || null,
+    last_writeback_error: meeting?.last_writeback_error || null,
+    last_writeback_note: meeting?.last_writeback_note || null,
   }))
 
   const [saving, setSaving] = useState(false)
@@ -172,7 +176,8 @@ export default function MeetingModal({
 
   if (!open) return null
 
-  const canEditCore = !isCalendly
+  const canEditCore = true
+  const providerBacked = isCalendly || isZoomMeeting || Boolean(draft.zoom_meeting_id)
   const titleDrift = providerDrift(draft, 'title')
   const startDrift = providerDrift(draft, 'start_time')
   const providerName = draft.source === 'zoom' || draft.external_provider === 'zoom' ? 'Zoom' : 'Calendly'
@@ -230,15 +235,8 @@ export default function MeetingModal({
         zoom_meeting_uuid: draft.zoom_meeting_uuid || null,
       }
 
-      // For Calendly meetings, only allow CRM-linkage + notes/status tweaks.
-      if (isCalendly) {
-        const safePatch = {
-          lead_id: payload.lead_id,
-          client_id: payload.client_id,
-          notes: payload.notes,
-          status: payload.status,
-        }
-        await updateMeetingById(draft.id, safePatch)
+      if (!isNew && providerBacked) {
+        await saveMeetingChanges(draft.id, payload)
       } else if (isNew) {
         await createMeeting(payload)
       } else {
@@ -261,7 +259,7 @@ export default function MeetingModal({
             <div className="modalTitle">{isNew ? 'New meeting' : isCalendly ? 'Calendly meeting' : 'Edit meeting'}</div>
             <div className="modalSub">
               {isCalendly
-                ? 'Synced from Calendly. Notes, status, and the client or lead link are yours — sync will not overwrite them.'
+                ? 'Calendly can be canceled from here. It cannot move the time; a time you set is kept in the CRM and sent to Zoom.'
                 : 'Notes, status, and the client or lead link stay when a provider syncs. A time or title you edit is kept too.'}
             </div>
           </div>
@@ -272,6 +270,8 @@ export default function MeetingModal({
 
         <div className="modalBody">
           {error ? <div className="inlineError">{error.message || 'Failed to save meeting.'}</div> : null}
+          {draft.last_writeback_error ? <div className="inlineError">{draft.last_writeback_error}</div> : null}
+          {draft.last_writeback_note ? <div className="sHint">{draft.last_writeback_note}</div> : null}
 
           <div className="formGrid">
             <label className="sField" style={{ gridColumn: '1 / -1' }}>
@@ -353,7 +353,7 @@ export default function MeetingModal({
               />
             </label>
 
-            {canEditCore ? (
+            {!isCalendly ? (
               <div className="sField zoomField" style={{ gridColumn: '1 / -1' }}>
                 <div className="sLabel">Zoom</div>
                 {zoomError ? (
@@ -398,6 +398,15 @@ export default function MeetingModal({
               </div>
             ) : null}
 
+            <div className="sField" style={{ gridColumn: '1 / -1' }}>
+              <div className="sHint">
+                {draft.link_origin === 'auto'
+                  ? `Matched from ${draft.invitee_email || 'the invitee email'}. Changing the client or lead is kept.`
+                  : draft.link_origin === 'unlinked'
+                    ? 'You cleared this link. Sync will not attach a client or lead again.'
+                    : 'A client or lead you pick here is kept when Calendly or Zoom syncs.'}
+              </div>
+            </div>
             <label className="sField">
               <div className="sLabel">Link to lead</div>
               <Select

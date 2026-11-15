@@ -59,6 +59,32 @@ export async function createZoomMeeting({
   return data
 }
 
+async function invokeFunction(name, body) {
+  const { data, error } = await supabase.functions.invoke(name, { body })
+  if (error) {
+    let message = error.message || 'Request failed.'
+    try {
+      if (error.context && typeof error.context.json === 'function') {
+        const payload = await error.context.json()
+        if (payload?.error) message = payload.error
+      }
+    } catch {
+      // The status text is enough when the body is not JSON.
+    }
+    throw new Error(message)
+  }
+  if (data?.error) throw new Error(data.error)
+  return data
+}
+
+export async function saveMeetingChanges(meetingId, patch) {
+  return invokeFunction('meeting-writeback', { meeting_id: meetingId, action: 'save', patch })
+}
+
+export async function deleteMeetingEverywhere(meetingId) {
+  return invokeFunction('meeting-writeback', { meeting_id: meetingId, action: 'delete' })
+}
+
 export async function openRecording(recordingId, kind = 'media') {
   const { data, error } = await supabase.functions.invoke('zoom-recording-access', {
     body: { recording_id: recordingId, kind },

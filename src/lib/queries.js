@@ -10,7 +10,7 @@ export const CLIENT_COLUMNS =
 export const TASK_COLUMNS =
   'id, title, description, status, priority, due_date, assigned_to, client_id, lead_id, created_at'
 export const MEETING_COLUMNS =
-  'id, title, start_time, end_time, status, status_origin, advisor_id, client_id, lead_id, link_origin, invitee_email, source, notes, meeting_type, meeting_url, external_provider, external_event_uri, external_invitee_uri, location, field_origins, provider_snapshot, zoom_meeting_id, zoom_meeting_uuid, provider_summary'
+  'id, title, start_time, end_time, status, status_origin, advisor_id, client_id, lead_id, link_origin, invitee_email, source, notes, meeting_type, meeting_url, external_provider, external_event_uri, external_invitee_uri, location, field_origins, provider_snapshot, zoom_meeting_id, zoom_meeting_uuid, provider_summary, last_writeback_at, last_writeback_error, last_writeback_note'
 
 export function formatAlternateEmails(value) {
   return Array.isArray(value) ? value.filter(Boolean).join(', ') : ''
