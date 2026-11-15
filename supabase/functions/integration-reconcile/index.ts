@@ -104,9 +104,15 @@ Deno.serve(async (req: Request) => {
     }
   }
 
+  const linked = await admin.rpc("link_meetings_to_people", { target_meeting: null });
+  if (linked.error && !/link_meetings_to_people|schema cache|does not exist/i.test(linked.error.message || "")) {
+    console.warn("[integration-reconcile] link skipped", linked.error.message);
+  }
+
   return json({
     ok: calendly.every((r) => r.ok) && zoom.every((r) => r.ok),
     calendly,
     zoom,
+    linked: linked.error ? null : linked.data,
   });
 });

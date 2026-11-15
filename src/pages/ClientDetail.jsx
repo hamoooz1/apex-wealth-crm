@@ -21,7 +21,7 @@ import {
   Video,
   X,
 } from 'lucide-react'
-import { addClientNote, deleteClientNote, fetchClientDetail } from '../lib/queries.js'
+import { addClientNote, deleteClientNote, fetchClientDetail, formatAlternateEmails, parseAlternateEmails } from '../lib/queries.js'
 import {
   deleteClientDocument,
   formatFileSize,
@@ -213,6 +213,7 @@ export default function ClientDetail() {
       first_name: c.first_name || '',
       last_name: c.last_name || '',
       email: c.email || '',
+      alternate_emails: formatAlternateEmails(c.alternate_emails),
       phone: c.phone || '',
       advisor_id: c.advisor_id || '',
       aum: c.aum ?? '',
@@ -236,6 +237,7 @@ export default function ClientDetail() {
         first_name: draft.first_name || null,
         last_name: draft.last_name || null,
         email: draft.email || null,
+        alternate_emails: parseAlternateEmails(draft.alternate_emails),
         phone: draft.phone || null,
         advisor_id: draft.advisor_id || null,
         aum: draft.aum === '' ? null : Number(draft.aum),
@@ -445,6 +447,10 @@ export default function ClientDetail() {
               <input className="sInput" value={draft.email} onChange={(e) => setDraft((d) => ({ ...d, email: e.target.value }))} />
             </label>
             <label className="sField">
+              <div className="sLabel">Other emails</div>
+              <input className="sInput" value={draft.alternate_emails} onChange={(e) => setDraft((d) => ({ ...d, alternate_emails: e.target.value }))} placeholder="comma-separated" />
+            </label>
+            <label className="sField">
               <div className="sLabel">Phone</div>
               <input className="sInput" value={draft.phone} onChange={(e) => setDraft((d) => ({ ...d, phone: e.target.value }))} />
             </label>
@@ -479,6 +485,9 @@ export default function ClientDetail() {
           <div className="cdFact">
             <div className="cdFactLabel">Email</div>
             <div className="cdFactValue">{c.email || '—'}</div>
+            {formatAlternateEmails(c.alternate_emails) ? (
+              <div className="muted">{formatAlternateEmails(c.alternate_emails)}</div>
+            ) : null}
           </div>
           <div className="cdFact">
             <div className="cdFactLabel">Phone</div>

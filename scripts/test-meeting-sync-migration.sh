@@ -34,4 +34,8 @@ fi
 "${PSQL[@]}" -v ON_ERROR_STOP=1 -d "$DB" -f "$ROOT/supabase/tests/zoom_source_of_truth_test.sql"
 "${PSQL[@]}" -v ON_ERROR_STOP=1 -d "$DB" -f "$ROOT/supabase/migrations/20261115150000_zoom_source_of_truth.sql"
 "${PSQL[@]}" -v ON_ERROR_STOP=1 -d "$DB" -f "$ROOT/supabase/tests/zoom_source_of_truth_test.sql"
+"${PSQL[@]}" -v ON_ERROR_STOP=1 -d "$DB" -f "$ROOT/supabase/migrations/20261115160000_meeting_people_links.sql"
+"${PSQL[@]}" -v ON_ERROR_STOP=1 -d "$DB" -f "$ROOT/supabase/tests/meeting_people_links_test.sql"
+"${PSQL[@]}" -v ON_ERROR_STOP=1 -d "$DB" -f "$ROOT/supabase/migrations/20261115160000_meeting_people_links.sql"
+"${PSQL[@]}" -v ON_ERROR_STOP=1 -d "$DB" -f "$ROOT/supabase/tests/meeting_people_links_test.sql"
 echo "meeting sync migration ok"

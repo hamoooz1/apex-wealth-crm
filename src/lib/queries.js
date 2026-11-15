@@ -4,13 +4,22 @@ const PROFILE_MIN = 'id, full_name, email, role, avatar_url'
 const PROFILE_LIST = `${PROFILE_MIN}, manager_id, is_active, created_at`
 
 export const LEAD_COLUMNS =
-  'id, first_name, last_name, email, phone, source, status, assigned_to, notes, created_at, updated_at'
+  'id, first_name, last_name, email, alternate_emails, phone, source, status, assigned_to, notes, created_at, updated_at'
 export const CLIENT_COLUMNS =
-  'id, lead_id, first_name, last_name, email, phone, advisor_id, aum, status, next_review_date, created_at'
+  'id, lead_id, first_name, last_name, email, alternate_emails, phone, advisor_id, aum, status, next_review_date, created_at'
 export const TASK_COLUMNS =
   'id, title, description, status, priority, due_date, assigned_to, client_id, lead_id, created_at'
 export const MEETING_COLUMNS =
-  'id, title, start_time, end_time, status, status_origin, advisor_id, client_id, lead_id, source, notes, meeting_type, meeting_url, external_provider, external_event_uri, external_invitee_uri, location, field_origins, provider_snapshot, zoom_meeting_id, zoom_meeting_uuid, provider_summary'
+  'id, title, start_time, end_time, status, status_origin, advisor_id, client_id, lead_id, link_origin, invitee_email, source, notes, meeting_type, meeting_url, external_provider, external_event_uri, external_invitee_uri, location, field_origins, provider_snapshot, zoom_meeting_id, zoom_meeting_uuid, provider_summary'
+
+export function formatAlternateEmails(value) {
+  return Array.isArray(value) ? value.filter(Boolean).join(', ') : ''
+}
+
+export function parseAlternateEmails(value) {
+  const parts = Array.isArray(value) ? value : String(value || '').split(/[,;\s]+/)
+  return [...new Set(parts.map((part) => String(part || '').trim().toLowerCase()).filter((part) => part.includes('@')))]
+}
 export const PIPELINE_ENTRY_COLUMNS =
   'id, lead_id, stage_id, assigned_to, value, probability, entered_at, updated_at'
 export const STAGE_COLUMNS = 'id, name, sort_order, is_active'

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Plus, Search, Save, X } from 'lucide-react'
 
-import { fetchProfilesPageData, getLeadMeetings, LEAD_COLUMNS } from '../lib/queries.js'
+import { fetchProfilesPageData, formatAlternateEmails, getLeadMeetings, LEAD_COLUMNS, parseAlternateEmails } from '../lib/queries.js'
 import { supabase } from '../lib/supabaseClient.js'
 import { useAuth } from '../contexts/AuthContext.jsx'
 import { confettiBurst } from '../lib/confetti.js'
@@ -67,6 +67,7 @@ async function convertLeadToClient({ leadId, patchLead, leadRow }) {
       first_name: leadRow.first_name,
       last_name: leadRow.last_name || null,
       email: leadRow.email || null,
+      alternate_emails: parseAlternateEmails(leadRow.alternate_emails),
       phone: leadRow.phone || null,
       advisor_id: leadRow.assigned_to || null,
       aum: null,
@@ -191,6 +192,7 @@ export default function Leads() {
       first_name: '',
       last_name: '',
       email: '',
+      alternate_emails: '',
       phone: '',
       source: '',
       status: 'new',
@@ -207,6 +209,7 @@ export default function Leads() {
       first_name: lead.first_name || '',
       last_name: lead.last_name || '',
       email: lead.email || '',
+      alternate_emails: formatAlternateEmails(lead.alternate_emails),
       phone: lead.phone || '',
       source: lead.source || '',
       status: lead.status || 'new',
@@ -226,6 +229,7 @@ export default function Leads() {
         const prev = leads.find((l) => l.id === editingId)
         const patch = {
           ...draft,
+          alternate_emails: parseAlternateEmails(draft.alternate_emails),
           assigned_to: draft.assigned_to || null,
           updated_at: new Date().toISOString(),
         }
@@ -256,6 +260,7 @@ export default function Leads() {
       } else {
         const payload = {
           ...draft,
+          alternate_emails: parseAlternateEmails(draft.alternate_emails),
           assigned_to: draft.assigned_to || null,
           created_at: new Date().toISOString(),
           updated_at: new Date().toISOString(),
@@ -432,6 +437,18 @@ export default function Leads() {
                       setDraft((d) => ({ ...d, email: e.target.value }))
                       setDirty(true)
                     }}
+                  />
+                </label>
+                <label className="sField">
+                  <div className="sLabel">Other emails</div>
+                  <input
+                    className="sInput"
+                    value={draft.alternate_emails}
+                    onChange={(e) => {
+                      setDraft((d) => ({ ...d, alternate_emails: e.target.value }))
+                      setDirty(true)
+                    }}
+                    placeholder="comma-separated"
                   />
                 </label>
                 <label className="sField">

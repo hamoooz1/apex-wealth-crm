@@ -302,6 +302,8 @@ export async function applyCalendlyInvitee(
   const zoom = zoomFieldsFromLocation(input.location, incoming.meeting_url);
   if (zoom.zoomMeetingId) incoming.zoom_meeting_id = zoom.zoomMeetingId;
   if (zoom.uuid) incoming.zoom_meeting_uuid = zoom.uuid;
+  const inviteeEmail = asString(input.invitee.email);
+  if (inviteeEmail) incoming.invitee_email = inviteeEmail.trim().toLowerCase();
 
   const owned = plan.action === "update" ? await loadOwnership(admin, plan.id) : null;
   const patch = mergeProviderFields({
@@ -313,6 +315,12 @@ export async function applyCalendlyInvitee(
 
   const meetingId = plan.action === "insert" ? await writeMeeting(admin, null, patch) : await writeMeeting(admin, plan.id, patch);
   if (zoom.zoomMeetingId && meetingId) await rememberZoomId(admin, meetingId, zoom.zoomMeetingId);
+  if (meetingId) {
+    const linked = await admin.rpc("link_meetings_to_people", { target_meeting: meetingId });
+    if (linked.error && !/link_meetings_to_people|schema cache|does not exist/i.test(linked.error.message || "")) {
+      console.warn("[calendly] link skipped", linked.error.message);
+    }
+  }
   return plan.action === "insert" ? "inserted" : "updated";
 }
 
