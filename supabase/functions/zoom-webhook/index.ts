@@ -153,41 +153,6 @@ async function attachSummary(
       summary: summaryText,
     });
   }
-
-  const stamp = new Date().toISOString().slice(0, 10);
-  const meetingTitle = meetingRow?.title || topic || "Zoom meeting";
-
-  if (meetingRow?.id) {
-    const prefix = meetingRow.notes ? `${meetingRow.notes}\n\n` : "";
-    const stamped = `--- AI summary (${stamp}) — ${meetingTitle} ---\n${summaryText}`;
-    await supabaseAdmin.from("meetings").update({ notes: `${prefix}${stamped}` }).eq("id", meetingRow.id);
-  }
-
-  if (meetingRow?.client_id && advisorId) {
-    const sourceRef = `zoom:summary:${zoomMeetingId}`;
-    const noteBody = `--- Zoom AI summary (${stamp}) — ${meetingTitle} ---\n\n${summaryText}`;
-    const { data: existingNote } = await supabaseAdmin
-      .from("client_notes")
-      .select("id")
-      .eq("client_id", meetingRow.client_id)
-      .eq("source_ref", sourceRef)
-      .maybeSingle();
-
-    if (existingNote?.id) {
-      await supabaseAdmin
-        .from("client_notes")
-        .update({ body: noteBody, kind: "meeting", updated_at: new Date().toISOString() })
-        .eq("id", existingNote.id);
-    } else {
-      await supabaseAdmin.from("client_notes").insert({
-        client_id: meetingRow.client_id,
-        author_id: advisorId,
-        kind: "meeting",
-        body: noteBody,
-        source_ref: sourceRef,
-      });
-    }
-  }
 }
 
 async function ensureRecapTask(

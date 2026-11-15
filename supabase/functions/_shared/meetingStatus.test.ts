@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 import {
   deliveryKind,
   externalMeetingPatch,
+  mergeProviderFields,
   mapCalendlyStatus,
   planCalendlyWrite,
   resolveStatusWrite,
@@ -211,5 +212,49 @@ describe("webhook and token helpers", () => {
       scrubProviderBody('{"error":"invalid_grant","refresh_token":"super-secret"}'),
       '{"error":"invalid_grant","refresh_token":"***"}',
     );
+  });
+});
+
+describe("mergeProviderFields", () => {
+  it("keeps advisor edits and still records the provider value", () => {
+    const patch = mergeProviderFields({
+      existingOrigins: { title: "advisor", start_time: "provider" },
+      existingSnapshot: { title: "Old provider title" },
+      incoming: {
+        title: "Calendly title",
+        start_time: "2026-12-01T15:00:00.000Z",
+        notes: "do not write",
+        client_id: "c",
+        lead_id: "l",
+        status: "scheduled",
+      },
+    });
+    assert.equal(patch.title, undefined);
+    assert.equal(patch.start_time, "2026-12-01T15:00:00.000Z");
+    assert.equal(patch.notes, undefined);
+    assert.equal(patch.client_id, undefined);
+    assert.equal(patch.lead_id, undefined);
+    assert.equal(patch.status, "scheduled");
+    assert.equal((patch.provider_snapshot as { title: string }).title, "Calendly title");
+    assert.equal((patch.field_origins as { title: string }).title, "advisor");
+  });
+
+  it("releases time and location locks on a reschedule, not the title", () => {
+    const patch = mergeProviderFields({
+      existingOrigins: { title: "advisor", start_time: "advisor", meeting_url: "advisor" },
+      incoming: {
+        title: "Discovery",
+        start_time: "2026-12-02T15:00:00.000Z",
+        meeting_url: "https://zoom.us/j/83726104521",
+      },
+      release: ["start_time", "end_time", "meeting_url", "location", "meeting_type", "zoom_meeting_id", "zoom_meeting_uuid"],
+    });
+    assert.equal(patch.title, undefined);
+    assert.equal(patch.start_time, "2026-12-02T15:00:00.000Z");
+    assert.equal(patch.meeting_url, "https://zoom.us/j/83726104521");
+    const origins = patch.field_origins as Record<string, string>;
+    assert.equal(origins.title, "advisor");
+    assert.equal(origins.start_time, "provider");
+    assert.equal(origins.meeting_url, "provider");
   });
 });

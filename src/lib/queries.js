@@ -10,7 +10,7 @@ export const CLIENT_COLUMNS =
 export const TASK_COLUMNS =
   'id, title, description, status, priority, due_date, assigned_to, client_id, lead_id, created_at'
 export const MEETING_COLUMNS =
-  'id, title, start_time, end_time, status, advisor_id, client_id, lead_id, source, notes, meeting_type, meeting_url, external_provider, external_event_uri, location'
+  'id, title, start_time, end_time, status, status_origin, advisor_id, client_id, lead_id, source, notes, meeting_type, meeting_url, external_provider, external_event_uri, external_invitee_uri, location, field_origins, provider_snapshot'
 export const PIPELINE_ENTRY_COLUMNS =
   'id, lead_id, stage_id, assigned_to, value, probability, entered_at, updated_at'
 export const STAGE_COLUMNS = 'id, name, sort_order, is_active'

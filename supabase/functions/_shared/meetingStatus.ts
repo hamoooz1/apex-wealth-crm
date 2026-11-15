@@ -1,7 +1,7 @@
-// Pure Calendly/Zoom status rules. No I/O, so node can unit-test them.
+// Pure Calendly/Zoom sync rules. No I/O, so node can unit-test them.
 //
-// Later phases own field-level sync and email linking. This module only decides
-// which meeting status a provider event is allowed to write.
+// Status, field ownership, and (later) write-back decisions live here.
+// Email linking lives in SQL so the backfill and the webhook share one path.
 
 export type MeetingStatus = "scheduled" | "completed" | "canceled" | "no_show";
 export type StatusOrigin = "provider" | "advisor" | "system";
@@ -257,5 +257,89 @@ export function externalMeetingPatch(fields: Record<string, unknown>): Record<st
     if (value === undefined) continue;
     patch[key] = value;
   }
+  return patch;
+}
+
+/**
+ * Provider columns sync may refresh until an advisor edits that column.
+ * client_id, lead_id, and notes are never in this list.
+ * status stays on status_origin, not field_origins.
+ */
+export const PROVIDER_OWNED_FIELDS = [
+  "title",
+  "start_time",
+  "end_time",
+  "meeting_type",
+  "meeting_url",
+  "location",
+  "attendees",
+  "advisor_id",
+  "zoom_meeting_id",
+  "zoom_meeting_uuid",
+] as const;
+
+/** A Calendly reschedule is a new occurrence, so these locks are released. */
+export const RESCHEDULE_RELEASE_FIELDS = [
+  "start_time",
+  "end_time",
+  "meeting_url",
+  "location",
+  "meeting_type",
+  "zoom_meeting_id",
+  "zoom_meeting_uuid",
+] as const;
+
+const PROVIDER_OWNED = new Set<string>(PROVIDER_OWNED_FIELDS);
+
+function asOriginMap(value: unknown): Record<string, string> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  const out: Record<string, string> = {};
+  for (const [key, origin] of Object.entries(value as Record<string, unknown>)) {
+    if (origin === "advisor" || origin === "provider" || origin === "system") out[key] = origin;
+  }
+  return out;
+}
+
+function asSnapshot(value: unknown): Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  return { ...(value as Record<string, unknown>) };
+}
+
+/**
+ * Build the update a provider sync may apply.
+ * Advisor-origin fields are left out of the patch (the database trigger
+ * reverts them if a caller forgets). A reschedule passes those fields in
+ * `release` and sets their origin back to provider in the same update.
+ * provider_snapshot always records what the provider last said, including
+ * values the CRM refused to copy.
+ */
+export function mergeProviderFields(input: {
+  existingOrigins?: unknown;
+  existingSnapshot?: unknown;
+  incoming: Record<string, unknown>;
+  release?: readonly string[];
+}): Record<string, unknown> {
+  const origins = asOriginMap(input.existingOrigins);
+  const snapshot = asSnapshot(input.existingSnapshot);
+  const release = new Set(input.release ?? []);
+  const patch: Record<string, unknown> = {};
+
+  for (const [key, value] of Object.entries(input.incoming)) {
+    if (value === undefined) continue;
+    if (key === "client_id" || key === "lead_id" || key === "notes") continue;
+    if (key === "field_origins" || key === "provider_snapshot") continue;
+    if (PROVIDER_OWNED.has(key)) {
+      snapshot[key] = value;
+      const locked = origins[key] === "advisor" && !release.has(key);
+      if (release.has(key) && origins[key] === "advisor") origins[key] = "provider";
+      if (locked) continue;
+      patch[key] = value;
+      continue;
+    }
+    patch[key] = value;
+  }
+
+  patch.provider_snapshot = snapshot;
+  patch.field_origins = origins;
   return patch;
 }

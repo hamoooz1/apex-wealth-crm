@@ -1,7 +1,9 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import {
   externalMeetingPatch,
+  mergeProviderFields,
   planCalendlyWrite,
+  RESCHEDULE_RELEASE_FIELDS,
   type CalendlyDelivery,
   type MeetingMatch,
   type MeetingSnap,
@@ -168,20 +170,46 @@ async function rememberAlias(admin: Admin, meetingId: string, inviteeUri: string
   }
 }
 
-async function writeMeeting(admin: Admin, id: string | null, patch: Record<string, unknown>) {
+const OPTIONAL_COLUMNS = [
+  "rescheduled_from_invitee_uri",
+  "status_origin",
+  "field_origins",
+  "provider_snapshot",
+  "zoom_meeting_id",
+  "zoom_meeting_uuid",
+  "invitee_email",
+  "provider_summary",
+];
+
+async function writeMeeting(admin: Admin, id: string | null, patch: Record<string, unknown>): Promise<string | null> {
   const body = { ...patch };
-  const optional = ["rescheduled_from_invitee_uri", "status_origin"];
-  for (let attempt = 0; attempt < optional.length + 1; attempt++) {
+  for (let attempt = 0; attempt < OPTIONAL_COLUMNS.length + 1; attempt++) {
     const result = id
-      ? await admin.from("meetings").update(body).eq("id", id)
-      : await admin.from("meetings").insert(body);
-    if (!result.error) return;
+      ? await admin.from("meetings").update(body).eq("id", id).select("id").maybeSingle()
+      : await admin.from("meetings").insert(body).select("id").maybeSingle();
+    if (!result.error) {
+      const row = result.data as { id?: string } | null;
+      return row?.id ?? id;
+    }
     const message = result.error.message || "";
-    const missing = optional.find((col) => message.includes(col) && Object.prototype.hasOwnProperty.call(body, col));
+    const missing = OPTIONAL_COLUMNS.find((col) => message.includes(col) && Object.prototype.hasOwnProperty.call(body, col));
     if (!missing) throw result.error;
     delete body[missing];
   }
   throw new Error("Meeting write failed");
+}
+
+async function loadOwnership(admin: Admin, id: string): Promise<{ field_origins: unknown; provider_snapshot: unknown } | null> {
+  const row = await admin
+    .from("meetings")
+    .select("field_origins, provider_snapshot")
+    .eq("id", id)
+    .maybeSingle();
+  if (row.error) {
+    if (/field_origins|provider_snapshot|schema cache|does not exist/i.test(row.error.message || "")) return null;
+    throw row.error;
+  }
+  return (row.data as { field_origins: unknown; provider_snapshot: unknown } | null) ?? null;
 }
 
 export type ApplyResult = "inserted" | "updated" | "skipped";
@@ -239,7 +267,7 @@ export async function applyCalendlyInvitee(
   const meetingType = input.location && typeof input.location === "object"
     ? asString((input.location as Record<string, unknown>).type)
     : null;
-  const patch = externalMeetingPatch({
+  const incoming = externalMeetingPatch({
     source: "calendly",
     external_provider: "calendly",
     external_event_uri: input.eventUri,
@@ -256,6 +284,14 @@ export async function applyCalendlyInvitee(
     status: plan.status ?? undefined,
     status_origin: plan.status_origin ?? undefined,
     rescheduled_from_invitee_uri: plan.action === "update" && plan.reschedule ? plan.aliasInviteeUri : undefined,
+  });
+
+  const owned = plan.action === "update" ? await loadOwnership(admin, plan.id) : null;
+  const patch = mergeProviderFields({
+    existingOrigins: owned?.field_origins,
+    existingSnapshot: owned?.provider_snapshot,
+    incoming,
+    release: plan.action === "update" && plan.reschedule ? RESCHEDULE_RELEASE_FIELDS : [],
   });
 
   if (plan.action === "insert") {

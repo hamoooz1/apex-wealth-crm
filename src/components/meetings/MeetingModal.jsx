@@ -31,6 +31,35 @@ function fromLocalInputValue(v) {
   return d.toISOString()
 }
 
+function sameFieldValue(a, b) {
+  if (a == null && b == null) return true
+  if (a == null || b == null) return false
+  const left = Date.parse(a)
+  const right = Date.parse(b)
+  if (!Number.isNaN(left) && !Number.isNaN(right)) return left === right
+  return String(a) === String(b)
+}
+
+function formatProviderValue(field, value) {
+  if (value == null || value === '') return ''
+  if (field === 'start_time' || field === 'end_time') {
+    const d = new Date(value)
+    if (!Number.isNaN(d.getTime())) {
+      return d.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
+    }
+  }
+  return String(value)
+}
+
+/** Advisor-owned value when it differs from the last provider payload. */
+function providerDrift(draft, field) {
+  if (draft?.field_origins?.[field] !== 'advisor') return null
+  const snap = draft?.provider_snapshot?.[field]
+  if (snap == null || snap === '') return null
+  if (sameFieldValue(snap, draft[field])) return null
+  return formatProviderValue(field, snap)
+}
+
 export default function MeetingModal({
   open,
   onClose,
@@ -61,6 +90,8 @@ export default function MeetingModal({
     external_provider: meeting?.external_provider || null,
     external_event_uri: meeting?.external_event_uri || null,
     location: meeting?.location || null,
+    field_origins: meeting?.field_origins || {},
+    provider_snapshot: meeting?.provider_snapshot || {},
   }))
 
   const [saving, setSaving] = useState(false)
@@ -140,6 +171,9 @@ export default function MeetingModal({
   if (!open) return null
 
   const canEditCore = !isCalendly
+  const titleDrift = providerDrift(draft, 'title')
+  const startDrift = providerDrift(draft, 'start_time')
+  const providerName = draft.source === 'zoom' || draft.external_provider === 'zoom' ? 'Zoom' : 'Calendly'
 
   async function onGenerateZoom() {
     setZoomError(null)
@@ -215,7 +249,9 @@ export default function MeetingModal({
           <div>
             <div className="modalTitle">{isNew ? 'New meeting' : isCalendly ? 'Calendly meeting' : 'Edit meeting'}</div>
             <div className="modalSub">
-              {isCalendly ? 'Synced from Calendly (time/title are read-only).' : 'Create and link meetings to CRM records.'}
+              {isCalendly
+                ? 'Synced from Calendly. Notes, status, and the client or lead link are yours — sync will not overwrite them.'
+                : 'Notes, status, and the client or lead link stay when a provider syncs. A time or title you edit is kept too.'}
             </div>
           </div>
           <button className="iconBtn" type="button" onClick={onClose} aria-label="Close">
@@ -235,6 +271,9 @@ export default function MeetingModal({
                 onChange={(e) => setDraft((d) => ({ ...d, title: e.target.value }))}
                 disabled={!canEditCore}
               />
+              {titleDrift ? (
+                <div className="sHint">{providerName} still has “{titleDrift}”. Your title is kept.</div>
+              ) : null}
             </label>
 
             <label className="sField">
@@ -246,6 +285,9 @@ export default function MeetingModal({
                 onChange={(e) => setDraft((d) => ({ ...d, start_time: fromLocalInputValue(e.target.value) }))}
                 disabled={!canEditCore}
               />
+              {startDrift ? (
+                <div className="sHint">{providerName} still has {startDrift}. Your time is kept.</div>
+              ) : null}
             </label>
 
             <label className="sField">
